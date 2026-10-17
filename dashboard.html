@@ -1,0 +1,107 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Godown Agent</title>
+<style>
+:root{--bg:#0b0f14;--card:#121923;--line:#1f2a38;--tx:#e6edf5;--mut:#8aa0b6;--ok:#3ddc97;--warn:#ffb454;--bad:#ff6b6b;--acc:#5aa9ff;--learn:#c792ea}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,sans-serif}
+header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
+h1{font-size:18px;margin:0}.sub{color:var(--mut);font-size:12px}
+.pill{background:#1a2431;border:1px solid var(--line);border-radius:99px;padding:3px 10px;font-size:12px;color:var(--mut)}
+main{display:grid;grid-template-columns:320px 1fr 340px;gap:14px;padding:14px;max-width:1500px;margin:auto}
+@media(max-width:1000px){main{grid-template-columns:1fr}}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
+.card h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 10px}
+textarea{width:100%;background:#0d1219;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;min-height:70px;resize:vertical}
+button{background:var(--acc);color:#04101f;border:0;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer;font:inherit;font-weight:600}
+button.sec{background:#1a2431;color:var(--tx);border:1px solid var(--line)}button:disabled{opacity:.5}
+.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+.stage{display:grid;grid-template-columns:28px 1fr auto;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;opacity:.45;transition:.25s}
+.stage.on{opacity:1;border-color:var(--ok)}.stage .dot{width:22px;height:22px;border-radius:50%;background:#1f2a38;display:grid;place-items:center;font-size:12px}
+.stage.on .dot{background:var(--ok);color:#04201a}.stage b{display:block}.stage small{color:var(--mut)}.t{color:var(--mut);font-size:12px}
+.ev{padding:8px 10px;border-left:3px solid var(--warn);background:#1a1710;border-radius:6px;margin-bottom:6px;font-size:13px}
+.ev.learned{border-color:var(--learn);background:#17131f}.ev.err{border-color:var(--bad);background:#1f1212}
+table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}th{color:var(--mut);font-weight:500}
+.low{color:var(--bad)}.ship{border:1px dashed var(--ok);border-radius:10px;padding:10px;margin-top:8px}
+.big{font-size:22px;font-weight:700}.lesson{font-size:12px;color:var(--mut);border-bottom:1px solid var(--line);padding:5px 0}.lesson b{color:var(--learn)}
+.empty{color:var(--mut);font-size:13px}.k{display:flex;gap:18px;margin-top:6px}.k div{font-size:12px;color:var(--mut)}
+</style></head><body>
+<header><div><h1>Godown Agent</h1><div class="sub">Photo / voice / text order &rarr; dispatched shipment, no human steps</div></div>
+<span class="pill">1 LLM call on the happy path</span><span class="pill">MCP warehouse server</span><span class="pill">Jev healer</span></header>
+<main>
+<section>
+ <div class="card"><h2>1. Send an order</h2>
+  <textarea id="txt" placeholder="e.g. 3 laptops to Chennai for Ravi">PO ORD-101 Ravi: 3 laptops to Chennai</textarea>
+  <div class="row"><input type="file" id="file" accept="image/*,audio/*" style="display:none">
+   <button id="go">Dispatch</button><button class="sec" onclick="file.click()">Attach photo / voice</button><span id="fname" class="t"></span></div>
+  <h2 style="margin-top:14px">One-click demos</h2>
+  <div class="row">
+   <button class="sec" onclick="demo('text','PO ORD-201 Priya: 3 laptops to Madurai')">Happy path</button>
+   <button class="sec" onclick="demo('text','PO ORD-202 Ravi: 3 laptops to Chennai')">Out of stock</button>
+   <button class="sec" onclick="demo('text','PO ORD-203 Meena: 70 laptops to Hyderabad')">Split order</button>
+   <button class="sec" onclick="demo('text','PO ORD-204 Anu: 2 keyboards to Kovai (Peelamedu)')">Bad address &rarr; learn</button>
+   <button class="sec" onclick="demo('text','PO ORD-205 Kumar: 500 laptops to Pune')">Shortfall</button>
+   <button class="sec" onclick="demo('img','/samples/order1.png')">PO photo</button>
+   <button class="sec" onclick="demo('img','/samples/voice1.wav')">Voice note</button>
+  </div>
+  <div class="row"><button class="sec" onclick="reset()">Reset warehouse &amp; memory</button></div>
+  <div class="t" style="margin-top:8px">Tip: run <b>Bad address &rarr; learn</b> twice. The second run skips the healer.</div>
+ </div>
+</section>
+<section>
+ <div class="card"><h2>2. Pipeline <span id="clock" class="t"></span></h2>
+  <div class="stage" id="s-intake"><div class="dot">1</div><div><b>Intake (Gemini, multimodal)</b><small id="d-intake">reads photo / voice / text into an order</small></div><span class="t" id="t-intake"></span></div>
+  <div class="stage" id="s-godown"><div class="dot">2</div><div><b>Godown (MCP)</b><small id="d-godown">nearest godown with stock, reserve</small></div><span class="t" id="t-godown"></span></div>
+  <div class="stage" id="s-packroute"><div class="dot">3</div><div><b>Packaging &#8741; Routing (parallel)</b><small id="d-packroute">box size and distance</small></div><span class="t" id="t-packroute"></span></div>
+  <div class="stage" id="s-carrier"><div class="dot">4</div><div><b>Carriers (parallel quotes)</b><small id="d-carrier">fastest ETA wins</small></div><span class="t" id="t-carrier"></span></div>
+  <div class="stage" id="s-result"><div class="dot">5</div><div><b>Dispatch &amp; audit</b><small id="d-result">tracking ID and customer notification</small></div><span class="t" id="t-result"></span></div>
+ </div>
+ <div class="card" style="margin-top:14px"><h2>3. Self-healing &amp; learning log</h2><div id="log"><div class="empty">Nothing went wrong yet.</div></div></div>
+</section>
+<section>
+ <div class="card"><h2>Result</h2><div id="res" class="empty">Waiting for an order.</div>
+  <div class="k" id="metrics"></div></div>
+ <div class="card" style="margin-top:14px"><h2>Warehouse stock (live)</h2><div id="stock"></div></div>
+ <div class="card" style="margin-top:14px"><h2>Memory: lessons learned</h2><div id="lessons"><div class="empty">No lessons yet.</div></div></div>
+</section>
+</main>
+<script>
+const $=id=>document.getElementById(id);let fileData=null;
+$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;fileData=await toB64(f);$('fname').textContent=f.name};
+function toB64(f){return new Promise(r=>{const x=new FileReader();x.onload=()=>r({b64:x.result.split(',')[1],mime:f.type||'application/octet-stream'});x.readAsDataURL(f)})}
+async function demo(kind,v){if(kind==='text'){$('txt').value=v;fileData=null;$('fname').textContent='';return run()}
+ const b=await (await fetch(v)).blob();const f=new File([b],v.split('/').pop(),{type:v.endsWith('.wav')?'audio/wav':'image/png'});fileData=await toB64(f);$('fname').textContent=f.name;$('txt').value='';run()}
+$('go').onclick=run;
+function resetUI(){['intake','godown','packroute','carrier','result'].forEach(s=>{$('s-'+s).classList.remove('on');$('t-'+s).textContent=''});
+ $('log').innerHTML='';$('res').className='empty';$('res').textContent='Running...';$('metrics').innerHTML='';}
+async function run(){resetUI();$('go').disabled=true;
+ const body={text:$('txt').value,...(fileData?{file_b64:fileData.b64,mime:fileData.mime}:{})};
+ const r=await fetch('/api/order',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+ const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+ while(true){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
+  while((i=buf.indexOf('\n\n'))>=0){const ch=buf.slice(0,i);buf=buf.slice(i+2);if(ch.startsWith('data: '))handle(JSON.parse(ch.slice(6)))}}
+ while(busy)await new Promise(r=>setTimeout(r,100));
+ $('go').disabled=false;fileData=null;$('fname').textContent='';refresh()}
+function stage(s,d,t){const el=$('s-'+s);if(!el)return;el.classList.add('on');if(d)$('d-'+s).textContent=d;$('t-'+s).textContent=t+'s'}
+const Q=[];let busy=false;
+function handle(e){Q.push(e);if(!busy)pump()}
+async function pump(){busy=true;while(Q.length){const e=Q.shift();handle2(e);if(e.kind!=='end'&&e.stage!=='intake')await new Promise(r=>setTimeout(r,550))}busy=false}
+function handle2(e){
+ if(e.kind==='stage')stage(e.stage,e.detail,e.t);
+ else if(e.kind==='heal')log('heal','Healed: '+e.detail,e.t);
+ else if(e.kind==='learned')log('learned','Applied lesson: '+e.detail,e.t);
+ else if(e.kind==='error')log('err','Error: '+e.detail,e.t);
+ else if(e.kind==='result')showResult(e);
+ else if(e.kind==='end')$('clock').textContent='total '+e.t+'s'}
+function log(c,t,s){const l=$('log');const d=document.createElement('div');d.className='ev '+(c==='heal'?'':c);d.textContent=t+'  ('+s+'s)';l.appendChild(d)}
+function showResult(e){const r=e.result;stage('result',r.status,e.t);
+ if(r.status==='NO_ORDER'){$('res').className='';$('res').innerHTML='<div>'+e.text.replace(/\n/g,'<br>')+'</div>';return}
+ const ok=r.status==='OK';$('res').className='';
+ $('res').innerHTML=`<div class="big" style="color:${ok?'var(--ok)':'var(--warn)'}">${r.status}</div>`+(r.tracking_id?`<div class="ship"><b>${r.tracking_id}</b><br>${r.shipped} x ${r.sku} from ${r.godown}<br>via ${r.carrier}</div>`:`<div class="empty">${r.reason||''}</div>`);
+ const n=(r.healed||[]).length+(r.learned||[]).length;
+ $('metrics').innerHTML=`<div>LLM calls<br><b style="color:var(--tx);font-size:16px">${r.llm_calls}</b></div><div>Fixes<br><b style="color:var(--tx);font-size:16px">${(r.healed||[]).length}</b></div><div>Lessons applied<br><b style="color:var(--learn);font-size:16px">${(r.learned||[]).length}</b></div>`}
+async function refresh(){const s=await (await fetch('/api/state')).json();
+ const skus=[...new Set(s.stock.map(x=>x.sku))],gds=[...new Set(s.stock.map(x=>x.godown))];
+ $('stock').innerHTML=s.stock.length?'<table><tr><th>SKU</th>'+gds.map(g=>`<th>${g.replace('GD-','')}</th>`).join('')+'</tr>'+skus.map(k=>'<tr><td>'+k+'</td>'+gds.map(g=>{const q=(s.stock.find(x=>x.sku===k&&x.godown===g)||{}).qty;return `<td class="${q<5?'low':''}">${q}</td>`}).join('')+'</tr>').join('')+'</table>':'<div class="empty">Stock appears after the first order.</div>';
+ $('lessons').innerHTML=s.lessons.length?s.lessons.slice().reverse().map(l=>`<div class="lesson"><b>${l.stage}</b> ${l.problem}<br>&rarr; ${l.fix}</div>`).join(''):'<div class="empty">No lessons yet.</div>'}
+async function reset(){await fetch('/api/reset',{method:'POST'});resetUI();$('res').textContent='Reset. Warehouse and memory cleared.';refresh()}
+refresh();
+</script></body></html>

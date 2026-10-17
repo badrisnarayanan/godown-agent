@@ -155,6 +155,14 @@ class FulfilmentEngine(BaseAgent):
                 learned.append(f"address '{dest}' -> '{aliases[dest.lower()]}' (no healer call needed)")
                 dest = aliases[dest.lower()]
 
+            sent = {"h": 0, "l": 0}
+
+            def flush():
+                evs = [self._prog("heal", h, "heal") for h in healed[sent["h"]:]]
+                evs += [self._prog("learned", l, "learned") for l in learned[sent["l"]:]]
+                sent["h"], sent["l"] = len(healed), len(learned)
+                return evs
+
             async def lesson(stage, problem, fix):
                 healed.append(fix)
                 await call("save_lesson", stage=stage, problem=problem, fix=fix)
@@ -213,6 +221,9 @@ class FulfilmentEngine(BaseAgent):
             shipped = qty - need
             primary = picks[0][0]
             trace.append(f"godown {primary} reserved {shipped}/{qty} ({time.time() - t0:.1f}s)")
+            yield self._prog("godown", f"{primary} reserved {shipped}/{qty} x {sku} for {dest}")
+            for ev in flush():
+                yield ev
 
             # 2. PACKAGING || ROUTING ----------------------------------------------------
             box, route = await asyncio.gather(
@@ -221,6 +232,7 @@ class FulfilmentEngine(BaseAgent):
                 yield self._done(res | {"reason": route["error"], "llm_calls": llm_calls}, f"AUDIT FAILED: {route['error']}")
                 return
             trace.append(f"box {box['box']} x{box['boxes']} | route {route['distance_km']}km ({time.time() - t0:.1f}s)")
+            yield self._prog("packroute", f"box {box['box']} x{box['boxes']} ({box['total_weight_kg']}kg) | route {route['distance_km']}km, ~{route['drive_hours']}h drive")
 
             # 3. CARRIERS in parallel; heal by retry, then exclude ----------------------
             async def quote(c):
@@ -249,6 +261,10 @@ class FulfilmentEngine(BaseAgent):
                 return
             best = min(quotes, key=lambda q: (q["eta_hours"], q["price"]))  # speed first
             trace.append(f"carrier {best['carrier']} {best['eta_hours']}h from {len(quotes)} quotes ({time.time() - t0:.1f}s)")
+            yield self._prog("carrier", f"{best['carrier']} chosen: {best['eta_hours']}h, Rs {best['price']} (from {len(quotes)} quotes: "
+                             + ", ".join(f"{q['carrier']} {q['eta_hours']}h" for q in quotes) + ")")
+            for ev in flush():
+                yield ev
 
             # 4. DISPATCH ------------------------------------------------------------------
             ship = await call("create_shipment", order_id=order["order_id"], customer=order["customer"],
@@ -264,6 +280,11 @@ class FulfilmentEngine(BaseAgent):
         yield self._done(out, f"AUDIT {status} - engine {time.time() - t0:.1f}s (LLM calls: {llm_calls})\n"
                          + "\n".join("  - " + t for t in trace)
                          + f"\n{heal_txt}\nTracking {ship.get('tracking_id')} | {ship.get('notification', '')}")
+
+    def _prog(self, stage, detail, kind="stage"):
+        """Progress event (consumed live by the dashboard via custom_metadata; readable in ADK UI too)."""
+        return Event(author=self.name, content=types.Content(role="model", parts=[types.Part(text=f"[{stage}] {detail}")]),
+                     custom_metadata={"kind": kind, "stage": stage, "detail": detail, "t": round(time.time(), 2)})
 
     def _done(self, result, text):
         return Event(author=self.name, content=types.Content(role="model", parts=[types.Part(text=text)]),

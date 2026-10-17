@@ -24,7 +24,8 @@ image | voice | text ─► [Intake agent: Gemini multimodal]  (1 LLM call)
 ```
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
 cp my_agent/.env.example my_agent/.env   # add GOOGLE_API_KEY (+ JEV_API_KEY optional)
-.venv/bin/adk web .                      # UI with image upload + mic
+uvicorn dashboard:app --port 8020        # live dashboard: stages, healing log, stock, lessons memory
+.venv/bin/adk web .                      # raw ADK dev UI
 .venv/bin/python run_pipeline.py samples/order1.png
 .venv/bin/python eval_suite.py           # 10 cases: happy path, reroute, split, shortfall, bad address, voice, image...
 ```
