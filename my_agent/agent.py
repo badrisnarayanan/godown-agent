@@ -123,7 +123,11 @@ class FulfilmentEngine(BaseAgent):
         try:
             sku, qty, dest = order["sku"], int(order["qty"]), order["destination"]
         except Exception:
-            yield self._done(res | {"reason": f"intake produced no valid order: {state.get('order')}"}, "AUDIT FAILED: bad intake")
+            yield self._done(res | {"status": "NO_ORDER", "reason": f"intake produced no valid order: {state.get('order')}"},
+                             "I'm the autonomous logistics agent. Send me an order and I'll pick the godown, pack it, "
+                             "choose the fastest carrier and dispatch it - no human steps.\n"
+                             "Send it as a photo of a purchase order, a voice note, or text, e.g.:\n"
+                             "  \"3 laptops to Chennai for Ravi\"  |  \"2 keyboards to Kovai for Anu\"")
             return
         params = StdioServerParameters(command=sys.executable, args=[SERVER], env=env or None)
         async with stdio_client(params) as (r, w), ClientSession(r, w) as mcp:
