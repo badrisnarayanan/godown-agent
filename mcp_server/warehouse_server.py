@@ -27,6 +27,51 @@ SKU_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,23}$")
 MAX_QTY = 10_000
 
 
+# ---- business policy: Vegam Logistics only handles consumer electronics ----
+_DENY = re.compile(r"\b(rats?|mice\s+trap|mouse\s*trap|animals?|pets?|dogs?|cats?|puppy|puppies|kittens?|birds?|fish|snakes?|insects?|"
+                   r"food|fruits?|vegetables?|rice|meat|milk|medicines?|drugs?|weapons?|guns?|knife|knives|explosives?|chemicals?|"
+                   r"poison|alcohol|liquor|tobacco|cigarettes?|humans?|organs?|plants?|seeds?|cash|gold|jewel\w*|clothes|clothing|furniture)\b", re.I)
+_ALLOW = re.compile(r"\b(laptops?|notebooks?|phones?|mobiles?|smartphones?|tablets?|ipads?|chargers?|adapters?|cables?|usb|hdmi|hubs?|docks?|"
+                    r"monitors?|displays?|screens?|keyboards?|mouse|mice|webcams?|cameras?|headphones?|earphones?|earbuds?|headsets?|speakers?|"
+                    r"microphones?|routers?|modems?|switch|batter(?:y|ies)|power\s*banks?|ssd|hdd|drives?|ram|gpu|cpu|processors?|"
+                    r"motherboards?|printers?|scanners?|projectors?|tv|televisions?|smartwatch|drones?|consoles?|gamepads?|controllers?|"
+                    r"sensors?|led|bulbs?|sockets?|ups|inverters?|coolers?|electronics?)\b", re.I)
+POLICY_MSG = "Vegam Logistics only handles consumer electronics (computers, phones, accessories, components and similar), so I can't add {name!r}."
+
+
+def _jev_is_electronics(name):
+    key = os.environ.get("JEV_API_KEY") or os.environ.get("TYPESAFE_API_KEY")
+    if not key:
+        return None
+    try:
+        body = {"state": name, "model": "jev-latest", "questions": {"cat": {
+            "type": "choice", "instructions": "Is this product consumer electronics: an electronic device, accessory or component?",
+            "criteria": {"electronics": "An electronic device, accessory, component or appliance with electronics",
+                         "other": "Anything else: animals, food, clothing, furniture, chemicals, weapons, plants, etc."}}}}
+        req = urllib.request.Request("https://api.typesafe.ai/v1/systemone", data=json.dumps(body).encode(),
+                                     headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=6) as r:
+            a = json.load(r)["answers"]["cat"]
+        return a["choice"] == "electronics" and a["confidence"] >= 0.7
+    except Exception:
+        return None
+
+
+def _policy_error(name):
+    """None if the product may be stocked, else an error dict. Deny list, then allow list, then Jev. Fails closed."""
+    name = _clean(name, 60)
+    if _DENY.search(name):
+        return {"error": POLICY_MSG.format(name=name), "policy": "electronics_only"}
+    if _ALLOW.search(name):
+        return None
+    verdict = _jev_is_electronics(name)
+    if verdict is True:
+        return None
+    return {"error": POLICY_MSG.format(name=name) if verdict is False else
+            f"I could not confirm that {name!r} is consumer electronics, so I have not added it. An admin can add it manually if it qualifies.",
+            "policy": "electronics_only"}
+
+
 def _bad_qty(qty):
     return not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > MAX_QTY
 
@@ -378,6 +423,9 @@ def add_item(sku: str, name: str, weight_kg: float, volume_l: float, price: floa
         return {"error": f"sku '{sku}' already exists", "hint": "use restock for existing products"}
     if not name:
         return {"error": "name is required"}
+    pe = _policy_error(name) or _policy_error(sku.replace("-", " "))
+    if pe:
+        return pe
     if not (0 < weight_kg <= 500 and 0 < volume_l <= 2000 and 0 <= cost <= 10_000_000 and 0 <= price <= 10_000_000):
         return {"error": "weight 0-500 kg, volume 0-2000 L, price and cost 0-10,000,000 are required"}
     if qty < 0 or qty > MAX_QTY:
@@ -425,6 +473,8 @@ def update_item(sku: str, name: str = "", price: float = -1, cost: float = -1,
     fields = {"name": _clean(name, 60) or None, "price": price if price >= 0 else None, "cost": cost if cost >= 0 else None,
               "weight": weight_kg if weight_kg > 0 else None, "volume": volume_l if volume_l > 0 else None}
     fields = {k: v for k, v in fields.items() if v is not None}
+    if "name" in fields and _policy_error(fields["name"]):
+        return _policy_error(fields["name"])
     if not fields:
         return {"error": "nothing to change", "hint": "pass at least one of name, price, cost, weight_kg, volume_l"}
     if any(k in fields and not (0 <= fields[k] <= 10_000_000) for k in ("price", "cost")):

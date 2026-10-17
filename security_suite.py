@@ -18,6 +18,8 @@ def call(method, path, body=None, token=None, raw=False, headers=None):
         except Exception: return e.code, data.decode()[:200], dict(e.headers)
     except (urllib.error.URLError, BrokenPipeError, ConnectionResetError):
         return -1, "connection closed by server", {}  # server refused an oversized body mid-upload
+    except (urllib.error.URLError, BrokenPipeError, ConnectionResetError):
+        return -1, "connection closed by server", {}  # server refused an oversized body mid-upload
 
 def order(text, session=None, **kw):
     st, data, _ = call("POST", "/api/order", {"text": text, "session": session, **kw}, raw=True)
@@ -49,7 +51,7 @@ for q in (-50, 0, 10**9):
     check(f"restock qty={q} rejected", "error" in r and "added" not in r, r.get("error", "")[:40])
 st, r, _ = call("POST", "/api/item", {"sku": "<img onerror=x>", "name": "x", "weight_kg": 1, "volume_l": 1, "price": 1, "cost": 1}, token=TOK)
 check("add_item with HTML in SKU rejected", "error" in r, r.get("error", "")[:50])
-st, r, _ = call("POST", "/api/item", {"sku": "SEC-TEST", "name": "<script>alert(1)</script>Probe", "weight_kg": 1, "volume_l": 1, "price": 10, "cost": 5, "qty": 5}, token=TOK)
+st, r, _ = call("POST", "/api/item", {"sku": "SEC-TEST", "name": "<script>alert(1)</script>USB cable probe", "weight_kg": 1, "volume_l": 1, "price": 10, "cost": 5, "qty": 5}, token=TOK)
 st2, cat, _ = call("GET", "/api/catalog")
 check("product name is stripped of < >", "<" not in json.dumps(cat.get("SEC-TEST", {})) and ">" not in cat.get("SEC-TEST", {}).get("name", ""), cat.get("SEC-TEST", {}).get("name"))
 st, r, _ = call("POST", "/api/item", {"sku": "SEC-BAD", "name": "x", "weight_kg": -1, "volume_l": 1, "price": 1, "cost": 1}, token=TOK)
