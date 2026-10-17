@@ -7,3 +7,4 @@ __pycache__/
 mcp_server/lessons.json
 .DS_Store
 mcp_server/.fail_state.json
+uploads/

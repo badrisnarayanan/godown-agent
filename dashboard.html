@@ -146,6 +146,50 @@ code.tool{display:block;font:600 11px ui-monospace,Menlo,monospace;color:var(--m
 .split{display:flex;height:16px;margin:4px 0 6px;border:1.5px solid var(--ink)}.split i{display:block;height:100%}
 .sk{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--mute)}.sk span i{display:inline-block;width:9px;height:9px;margin-right:4px}
 .unit{display:grid;grid-template-columns:110px 1fr 90px;gap:8px;align-items:center;font-size:12.5px;margin:3px 0}
+.ctab{width:100%;border-collapse:collapse;font-size:13px;margin:6px 0 10px}
+.ctab th{font:700 12px "Barlow Condensed";letter-spacing:.05em;color:var(--mute);text-align:right;padding:3px 6px;border-bottom:2px solid var(--ink)}
+.ctab td{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right}.ctab th:first-child,.ctab td:first-child{text-align:left}
+.ctab .low{color:var(--red);font-weight:700}
+.frm{display:flex;flex-wrap:wrap;gap:6px;align-items:end;margin:6px 0}
+.frm label{display:flex;flex-direction:column;font-size:11px;color:var(--mute);gap:2px}
+.frm input,.frm select{border:2px solid var(--ink);padding:5px 7px;font:inherit;font-size:13px;background:#fff;min-width:0}
+.frm input[type=number]{width:92px}.frm input.w{width:150px}
+details.add{border-top:1px solid var(--line);margin-top:8px;padding-top:8px}
+details.add summary{cursor:pointer;font:700 15px "Barlow Condensed";letter-spacing:.04em}
+.msg{font-size:13px;margin-top:6px;min-height:18px}.msg.ok{color:var(--teal)}.msg.err{color:var(--red)}
+
+.nav{display:flex;gap:2px;background:var(--ink);padding:0 24px;position:sticky;top:0;z-index:5}
+.nav button{background:none;border:0;color:#aebbc7;padding:9px 18px 8px;text-align:left;border-bottom:4px solid transparent}
+.nav button b{display:block;font:700 19px/1.1 "Barlow Condensed";letter-spacing:.05em;text-transform:none}
+.nav button small{font-size:11.5px}
+.nav button:hover{color:#fff}.nav button.on{color:var(--ink);background:var(--yellow);border-bottom-color:var(--yellow)}
+body[data-view="orders"] [data-views]:not([data-views~="orders"]),
+body[data-view="track"] [data-views]:not([data-views~="track"]){display:none!important}
+body[data-view="inv"] #live,body[data-view="biz"] #live{display:none}
+body:not([data-view="inv"]) #v-inv,body:not([data-view="biz"]) #v-biz{display:none}
+.wide{padding:20px 24px;max-width:1360px;margin:0 auto}
+.viewhead h2{font-size:30px;margin:0}.viewhead p{margin:2px 0 14px;color:var(--mute);max-width:70ch}
+.invgrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:16px;align-items:start}
+@media(max-width:1000px){.invgrid{grid-template-columns:1fr}.nav button small{display:none}}
+.banner{background:var(--ink);color:#fff;padding:14px 16px;border-left:8px solid var(--yellow)}
+.banner.done{border-left-color:var(--teal)}.banner.fail{border-left-color:var(--red)}
+.b-top{display:flex;justify-content:space-between;font:700 13px "Barlow Condensed";letter-spacing:.08em;color:var(--yellow);text-transform:none}
+.b-title{font:800 30px/1.1 "Barlow Condensed";margin-top:2px}.b-sub{color:#cfd8e0;font-size:14px;min-height:21px;overflow-wrap:anywhere}
+.bprog{height:6px;background:#2a3a48;margin-top:10px}.bprog i{display:block;height:100%;width:0;background:var(--yellow);transition:width .5s}
+.banner.done .bprog i{background:var(--teal)}.banner.fail .bprog i{background:var(--red)}
+.banner.working .b-title::after{content:"";display:inline-block;width:.5em;height:.5em;margin-left:10px;border-radius:50%;background:var(--yellow);animation:blink 1s infinite}
+.banner .btn{background:var(--yellow);border-color:var(--yellow)}.banner .btn.ghost{background:transparent;color:#fff;border-color:#8393a2}
+.srcprev{display:flex;gap:12px;align-items:center;background:var(--paper);border:2px solid var(--ink);padding:8px 10px;font-size:13px}
+.srcprev img{max-height:96px;border:1px solid var(--line)}.srcprev audio{height:34px}
+.srcprev small{display:block;color:var(--mute)}
+.chat{max-height:300px;overflow:auto;margin:8px 0;display:flex;flex-direction:column;gap:7px}
+.bub{padding:8px 11px;max-width:92%;font-size:13.5px;border-radius:10px;overflow-wrap:anywhere}
+.bub.me{background:var(--yellow);align-self:flex-end;border-bottom-right-radius:2px}
+.bub.bot{background:var(--concrete);border-bottom-left-radius:2px}
+.bub .acts{margin-top:6px;display:flex;flex-wrap:wrap;gap:4px}
+.bub .act{font:600 11px ui-monospace,Menlo,monospace;border:1.5px solid var(--teal);color:var(--teal);padding:0 6px;background:#fff}
+.bub .act.err{border-color:var(--red);color:var(--red)}
+.cform textarea{min-height:52px}
 </style>
 </head>
 <body>
@@ -158,10 +202,16 @@ code.tool{display:block;font:600 11px ui-monospace,Menlo,monospace;color:var(--m
     <div class="stat"><b id="st-time">-</b><small>last order, seconds</small></div>
   </div>
 </header>
+<nav class="nav" aria-label="Sections">
+  <button data-go="orders" class="on"><b>Orders</b><small>place and watch</small></button>
+  <button data-go="track"><b>Track</b><small>where is it now</small></button>
+  <button data-go="inv"><b>Inventory</b><small>add, remove, restock</small></button>
+  <button data-go="biz"><b>Business</b><small>revenue and costs</small></button>
+</nav>
 
-<main>
+<main id="live">
 <aside class="rail">
-  <h2>Place an order</h2>
+  <div data-views="orders"><h2>Place an order</h2>
   <textarea id="txt" aria-label="Order text" placeholder="e.g. 3 laptops to Chennai for Ravi"></textarea>
   <input type="file" id="file" accept="image/*,audio/*" hidden>
   <div class="row">
@@ -169,14 +219,14 @@ code.tool{display:block;font:600 11px ui-monospace,Menlo,monospace;color:var(--m
     <button class="btn" id="mic">Speak an order</button>
     <button class="btn" id="attach">Attach file</button>
   </div>
-  <div id="fname" class="hint"></div>
+  <div id="fname" class="hint"></div></div>
 
-  <div class="group"><h3>Quick orders</h3>
+  <div class="group" data-views="orders"><h3>Quick orders</h3>
     <div class="row">
       <button class="chip" data-t="PO ORD-201 Priya: 3 laptops to Madurai">3 laptops to Madurai</button>
       <button class="chip" data-t="PO ORD-206 Asha: 5 monitors to Chennai">5 monitors to Chennai</button>
     </div></div>
-  <div class="group"><h3>When things go wrong</h3>
+  <div class="group" data-views="orders"><h3>When things go wrong</h3>
     <div class="hint">Demo scenarios. Watch Vegam recover, on the map and in the log.</div>
     <div class="row">
       <button class="chip x" data-t="PO ORD-202 Ravi: 3 laptops to Chennai">Nearest godown is empty</button>
@@ -184,15 +234,16 @@ code.tool{display:block;font:600 11px ui-monospace,Menlo,monospace;color:var(--m
       <button class="chip x" data-t="PO ORD-204 Anu: 2 keyboards to Kovai (Peelamedu)">Address nobody can geocode</button>
       <button class="chip x" data-t="PO ORD-205 Kumar: 500 laptops to Pune">More than all stock</button>
     </div></div>
-  <div class="group"><h3>Order by photo or voice</h3>
+  <div class="group" data-views="orders"><h3>Order by photo or voice</h3>
     <div class="row">
       <button class="chip m" data-img="/samples/order1.png">Photo of a purchase order</button>
       <button class="chip m" data-img="/samples/voice1.wav">Voice note</button>
     </div></div>
-  <div class="group"><h3>Track a shipment</h3>
+  <div class="group" data-views="track"><h3>Find a shipment</h3>
+    <div class="hint">Enter the tracking ID from the order, or pick a recent one. Tracking runs on a fast demo clock: 1 hour of delivery time plays out in 5 seconds.</div>
     <div class="track"><input id="tid" placeholder="TRACKING ID" aria-label="Tracking ID"><button class="btn" id="trackgo">Track</button></div>
     <div class="row" id="recent"></div></div>
-  <div class="group"><h3>It remembers</h3>
+  <div class="group" data-views="orders"><h3>It remembers</h3>
     <div class="hint">Send "Address nobody can geocode" twice. The second time Vegam already knows the address and skips the fixer.</div>
     <label class="toggle"><input type="checkbox" id="chaos" checked><span>Carrier FastFreight goes down on its first request</span></label>
     <div class="row"><button class="btn" id="reset">Reset stock and memory</button></div>
@@ -200,7 +251,15 @@ code.tool{display:block;font:600 11px ui-monospace,Menlo,monospace;color:var(--m
 </aside>
 
 <section class="stage-area">
-  <div class="mapwrap" aria-label="Route map">
+  <div class="banner" id="banner" data-views="orders">
+    <div class="b-top"><span class="b-step" id="b-step">Ready</span><span class="b-time" id="b-time"></span></div>
+    <div class="b-title" id="b-title">Place an order to begin</div>
+    <div class="b-sub" id="b-sub">Choose a quick order, type one, attach a photo, or speak. Progress shows here, one step at a time.</div>
+    <div class="bprog"><i id="b-bar"></i></div>
+    <div class="row" id="b-act"></div>
+  </div>
+  <div class="srcprev" id="srcprev" data-views="orders" hidden></div>
+  <div class="mapwrap" data-views="orders track" aria-label="Route map">
     <div class="maptitle">LIVE SHIPMENT</div>
     <div class="tabs" id="tabs" hidden><button id="tab-s" class="on">Schematic</button><button id="tab-g">Google Maps</button></div>
     <img id="gmap" alt="Google Maps route" hidden>
@@ -208,8 +267,8 @@ code.tool{display:block;font:600 11px ui-monospace,Menlo,monospace;color:var(--m
     <div class="legend"><span><i style="background:var(--ink)"></i>godown</span><span><i style="background:var(--red)"></i>out of stock</span><span><i style="background:var(--teal)"></i>shipping from</span></div>
   </div>
 
-  <div class="uh"><b>Under the hood</b><span>Gemini reads the order</span><span>Python engine calls our MCP warehouse server</span><span>Jev decides when something breaks</span><span>Google Maps routes it</span></div>
-  <div class="pipe" id="pipe">
+  <div class="uh" data-views="orders"><b>Under the hood</b><span>Gemini reads the order</span><span>Python engine calls our MCP warehouse server</span><span>Jev decides when something breaks</span><span>Google Maps routes it</span></div>
+  <div class="pipe" id="pipe" data-views="orders">
     <div class="step" id="s-intake"><h3>Read order <span class="t" id="t-intake"></span></h3><code class="tool">Gemini vision / audio</code><p id="d-intake">Gemini reads the photo, voice or text.</p></div>
     <div class="step" id="s-godown"><h3>Find stock <span class="t" id="t-godown"></span></h3><code class="tool">check_stock, reserve_stock</code><p id="d-godown">Nearest godown that has it.</p></div>
     <div class="step" id="s-packroute"><h3>Pack and route <span class="t" id="t-packroute"></span></h3><code class="tool">select_box || get_route</code><p id="d-packroute">Box size and distance, in parallel.</p></div>
@@ -217,30 +276,80 @@ code.tool{display:block;font:600 11px ui-monospace,Menlo,monospace;color:var(--m
     <div class="step" id="s-result"><h3>Dispatch <span class="t" id="t-result"></span></h3><code class="tool">create_shipment</code><p id="d-result">Tracking ID and customer message.</p></div>
   </div>
 
-  <div class="biz"><h2>Business today</h2><div class="kpis" id="kpis"></div><div id="bizsplit"></div><div id="bysku"></div></div>
-
-  <div class="log">
+  <div class="log" data-views="orders">
     <h2>Problems Vegam solved on its own</h2>
     <div id="log"><div class="empty">Nothing has gone wrong yet. Try one of the "When things go wrong" orders.</div></div>
   </div>
 </section>
 
 <aside class="ledger">
-  <h2>Your shipment</h2>
+  <div data-views="orders"><h2>Your shipment</h2>
   <div id="res" class="empty">No order yet.</div>
-  <div class="meter" id="meter"></div>
+  <div class="meter" id="meter"></div></div>
 
-  <div id="trackbox" class="sec" hidden><h2>Tracking <span id="trk-id" class="badge"></span></h2><div id="trk-eta" style="font-weight:600"></div><ul class="tl" id="trk-tl"></ul></div>
-  <div class="uh2">Under the hood</div>
-  <div class="sec" style="margin-top:6px"><h2>Order details</h2><div id="details" class="empty">Appears once an order is read.</div></div>
+  <div id="track-empty" class="empty" data-views="track">Nothing selected. Pick a shipment on the left to see its timeline here and the truck on the map.</div>
+  <div id="trackbox" class="sec" data-views="track" hidden><div id="trk-src"></div><h2>Tracking <span id="trk-id" class="badge"></span></h2><div id="trk-eta" style="font-weight:600"></div><ul class="tl" id="trk-tl"></ul></div>
+  <div class="uh2" data-views="orders">Under the hood</div>
+  <div class="sec" data-views="orders" style="margin-top:6px"><h2>Order details</h2><div id="details" class="empty">Appears once an order is read.</div></div>
 
-  <div class="sec"><h2>Stock by godown</h2>
+  <div class="sec" data-views="orders"><h2>Stock by godown</h2>
     <div class="cols"><span>Bengaluru</span><span>Chennai</span><span>Hyderabad</span></div>
     <div id="stock"></div></div>
 
-  <div class="sec"><h2>What Vegam has learned</h2><div id="lessons"><div class="empty">Nothing learned yet. Fixes appear here and get reused.</div></div></div>
+  <div class="sec" data-views="orders"><h2>What Vegam has learned</h2><div id="lessons"><div class="empty">Nothing learned yet. Fixes appear here and get reused.</div></div></div>
 </aside>
 </main>
+
+<section id="v-inv" class="wide">
+  <div class="viewhead"><h2>Inventory</h2><p>Two ways to change stock. Tell the inventory assistant what you want in plain words, or use the forms. Both write to the same warehouse.</p></div>
+  <div class="invgrid">
+    <div>
+      <div class="biz"><h2>Products</h2><div id="cat"></div></div>
+      <div class="biz" style="margin-top:14px"><h2>Stock by godown</h2>
+        <div class="cols"><span>Bengaluru</span><span>Chennai</span><span>Hyderabad</span></div><div id="stock2"></div></div>
+    </div>
+    <div>
+      <div class="biz"><h2>Inventory assistant</h2>
+        <div class="hint">An AI agent that edits the warehouse for you. It asks before anything destructive. You can attach a photo of a delivery receipt or stock sheet.</div>
+        <div class="chat" id="chat" aria-live="polite"><div class="bub bot">Tell me what to change. For example: "add 30 monitors to Chennai".</div></div>
+        <div class="row" id="c-ex">
+          <button class="chip" data-p="Add 30 MONITOR-24 to Chennai">Add 30 monitors to Chennai</button>
+          <button class="chip" data-p="Write off 3 damaged laptops in Hyderabad">Write off 3 laptops</button>
+          <button class="chip" data-p="Add a new product: USB-C Hub, 0.2 kg, 0.4 litres, price 1800, cost 1100, put 50 units in Bengaluru">Add a new product</button>
+          <button class="chip" data-p="Raise the mouse price to 950">Change a price</button>
+          <button class="chip x" data-p="Remove the HD webcam product">Remove a product</button>
+        </div>
+        <form id="c-form" class="cform"><textarea id="c-in" rows="2" aria-label="Message to inventory assistant" placeholder="Type a change, or attach a receipt photo"></textarea>
+          <input type="file" id="c-file" accept="image/*,audio/*" hidden>
+          <div class="row"><button class="btn primary" type="submit" id="c-send">Send</button><button class="btn" type="button" id="c-attach">Attach photo</button><span class="hint" id="c-fname"></span></div></form>
+      </div>
+      <details class="biz" style="margin-top:14px"><summary style="cursor:pointer;font:700 18px 'Barlow Condensed'">Manual controls (no AI)</summary>
+        <form class="frm" id="f-restock"><label>Godown<select id="r-gd"><option value="GD-BLR">Bengaluru</option><option value="GD-CHN">Chennai</option><option value="GD-HYD">Hyderabad</option></select></label>
+      <label>Product<select id="r-sku"></select></label><label>Add units<input id="r-qty" type="number" min="1" value="20"></label>
+      <button class="btn primary" type="submit">Restock</button></form>
+    <details class="add"><summary>Add a new product</summary>
+      <form class="frm" id="f-item">
+        <label>SKU<input id="i-sku" class="w" placeholder="WEBCAM-HD" required></label>
+        <label>Name<input id="i-name" class="w" placeholder="HD Webcam" required></label>
+        <label>Price (Rs)<input id="i-price" type="number" min="0" step="any" required></label>
+        <label>Cost (Rs)<input id="i-cost" type="number" min="0" step="any" required></label>
+        <label>Weight (kg)<input id="i-w" type="number" min="0.01" step="any" required></label>
+        <label>Volume (L)<input id="i-v" type="number" min="0.01" step="any" required></label>
+        <label>First godown<select id="i-gd"><option value="GD-BLR">Bengaluru</option><option value="GD-CHN">Chennai</option><option value="GD-HYD">Hyderabad</option></select></label>
+        <label>Units<input id="i-qty" type="number" min="0" value="20"></label>
+        <button class="btn primary" type="submit">Add product</button></form>
+      <div class="hint">New products are usable in orders straight away. Try: "4 HD webcams to Madurai".</div></details>
+    <div class="msg" id="inv-msg" role="status"></div>
+      </details>
+    </div>
+  </div>
+</section>
+
+<section id="v-biz" class="wide">
+  <div class="viewhead"><h2>Business</h2><p>Every dispatched order adds revenue, product cost, carrier cost and packaging cost. Prices are mock figures in rupees.</p></div>
+  <div class="biz"><h2>Business today</h2><div class="kpis" id="kpis"></div><div id="bizsplit"></div><div id="bysku"></div></div>
+</section>
+
 
 <script>
 const $=id=>document.getElementById(id);
@@ -294,7 +403,7 @@ function renderDetails(){const o=D.order,r=D.route,b=D.box,q=D.quotes;let h='';
   if(q&&q.length){const mx=Math.max(...q.map(x=>x.eta_hours));h+=`<div style="margin-top:10px;font-size:12px;color:var(--mute)">Carrier quotes, delivery time</div>`+q.slice().sort((a,b)=>a.eta_hours-b.eta_hours).map(x=>`<div class="qrow ${x.carrier===D.chosen?'win':''}"><b>${esc(x.carrier)}</b><div class="qbar"><i style="width:${x.eta_hours/mx*100}%"></i></div><span>${x.eta_hours}h</span></div>`).join('')}
   if(h){$('details').className='';$('details').innerHTML=h}}
 $('attach').onclick=()=>$('file').click();
-$('file').onchange=async e=>{const f=e.target.files[0];if(f){fileData=await toB64(f);$('fname').textContent='Attached: '+f.name}};
+$('file').onchange=async e=>{const f=e.target.files[0];if(f){fileData=await toB64(f);$('fname').textContent='Attached: '+f.name;showSrc(fileData)}};
 function toB64(f){return new Promise(r=>{const x=new FileReader();x.onload=()=>r({b64:x.result.split(',')[1],mime:f.type||'application/octet-stream'});x.readAsDataURL(f)})}
 document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{$('txt').value=b.dataset.t;fileData=null;$('fname').textContent='';run()});
 document.querySelectorAll('[data-img]').forEach(b=>b.onclick=async()=>{const u=b.dataset.img;const blob=await (await fetch(u)).blob();
@@ -302,12 +411,23 @@ document.querySelectorAll('[data-img]').forEach(b=>b.onclick=async()=>{const u=b
 $('go').onclick=run;
 $('reset').onclick=async()=>{await fetch('/api/reset',{method:'POST'});resetUI(true);refresh()};
 
-function resetUI(full){stopTrack();oos={};src=null;route=null;D={};$('details').className='empty';$('details').textContent='Appears once an order is read.';showTab(false);drawMap();
+function resetUI(full){stopTrack();$('track-empty').hidden=false;oos={};src=null;route=null;D={};$('details').className='empty';$('details').textContent='Appears once an order is read.';showTab(false);drawMap();
   ['intake','godown','packroute','carrier','result'].forEach(s=>{$('s-'+s).classList.remove('on','cur');$('t-'+s).textContent=''});
   $('log').innerHTML='<div class="empty">'+(full?'Memory and stock reset.':'Running...')+'</div>';$('res').className='empty';$('res').textContent=full?'No order yet.':'Dispatching...';$('meter').innerHTML=''}
 
 const Q=[];let busy=false,lastTotal=null;
-async function run(){resetUI();$('go').disabled=true;
+/* ---- views ---- */
+function setView(v){document.body.dataset.view=v;document.querySelectorAll('[data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===v));
+  if(v!=='track')stopTrack();else if(!trkTimer){$('track-empty').hidden=false}
+  if(v==='orders'||v==='track')drawMap();if(v==='inv'||v==='biz')refresh();history.replaceState(null,'','#'+v);window.scrollTo(0,0)}
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setView(b.dataset.go));
+/* ---- banner: one place that always says where the order is ---- */
+const STEPS={intake:[1,'Reading your order'],godown:[2,'Finding stock'],packroute:[3,'Packing and routing'],carrier:[4,'Choosing the fastest carrier'],result:[5,'Dispatching']};
+function banner(stage,detail){const x=STEPS[stage];if(!x)return;const b=$('banner');b.className='banner working';$('b-step').textContent='Step '+x[0]+' of 5';$('b-title').textContent=x[1];$('b-sub').textContent=detail||'';$('b-bar').style.width=(x[0]/5*100)+'%';$('b-act').innerHTML=''}
+function showSrc(f,savedUrl){const el=$('srcprev');if(!f){el.hidden=true;return}const u=`data:${f.mime};base64,${f.b64}`;
+  el.hidden=false;el.innerHTML=(f.mime.startsWith('image')?`<img src="${u}" alt="Uploaded order">`:`<audio controls src="${u}"></audio>`)+`<div><b>Your order, as received</b><small id="saved-note">${savedUrl?'Saved: '+esc(savedUrl):'Saving a copy...'}</small></div>`}
+
+async function run(){setView('orders');resetUI();$('go').disabled=true;showSrc(fileData);banner('intake','Reading what you sent. This is the only step that needs an AI model.');
   const body={text:$('txt').value,chaos:$('chaos').checked,...(fileData?{file_b64:fileData.b64,mime:fileData.mime}:{})};
   const r=await fetch('/api/order',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
@@ -317,7 +437,7 @@ async function run(){resetUI();$('go').disabled=true;
   $('go').disabled=false;fileData=null;$('fname').textContent='';refresh()}
 async function pump(){busy=true;while(Q.length){const e=Q.shift();handle(e);if(e.kind!=='end'&&e.stage!=='intake')await new Promise(r=>setTimeout(r,650))}busy=false}
 
-function step(s,d,t){document.querySelectorAll('.step').forEach(x=>x.classList.remove('cur'));const el=$('s-'+s);if(!el)return;el.classList.add('on','cur');if(d)$('d-'+s).textContent=d;$('t-'+s).textContent=t+'s'}
+function step(s,d,t){banner(s,d);$('b-time').textContent=t+'s elapsed';document.querySelectorAll('.step').forEach(x=>x.classList.remove('cur'));const el=$('s-'+s);if(!el)return;el.classList.add('on','cur');if(d)$('d-'+s).textContent=d;$('t-'+s).textContent=t+'s'}
 function logEv(kind,label,text,t){const l=$('log');if(l.querySelector('.empty'))l.innerHTML='';const d=document.createElement('div');d.className='ev '+kind;d.innerHTML=`<b>${label}</b><span></span>`;d.lastChild.textContent=text+'  ('+t+'s)';l.appendChild(d)}
 function handle(e){
   if(e.kind==='stage'){
@@ -328,11 +448,18 @@ function handle(e){
   }
   else if(e.kind==='heal')logEv('heal','FIXED',e.detail,e.t);
   else if(e.kind==='learned')logEv('learned','REMEMBERED',e.detail,e.t);
-  else if(e.kind==='error')logEv('heal','ERROR',e.detail,e.t);
+  else if(e.kind==='error'){logEv('heal','ERROR',e.detail,e.t);const b=$('banner');b.className='banner fail';$('b-title').textContent='Something went wrong';$('b-sub').textContent=e.detail}
+  else if(e.kind==='saved'){const n=$('saved-note');if(n)n.textContent='Saved a copy: '+e.url}
   else if(e.kind==='result')showResult(e);
   else if(e.kind==='end'){lastTotal=e.t;$('st-time').textContent=e.t.toFixed(1)}}
 function smsText(t){const m=(t||'').split(' | ').pop();return m&&m.startsWith('Hi ')?`<div class="sms"><small>Text sent to customer</small>${esc(m)}</div>`:''}
-function showResult(e){const r=e.result;step('result',r.status,e.t);
+function finishBanner(r,e){const b=$('banner');const ok=r.status==='OK';b.className='banner '+(ok?'done':r.status==='PARTIAL'?'':'fail');
+  $('b-bar').style.width='100%';$('b-time').textContent='finished in '+e.t+'s';
+  if(r.status==='NO_ORDER'){$('b-title').textContent='That was not an order';$('b-sub').textContent='Try: "3 laptops to Chennai for Ravi"';return}
+  $('b-title').textContent=ok?'Dispatched':r.status==='PARTIAL'?'Partly shipped':'Could not ship';
+  $('b-sub').textContent=r.tracking_id?`${r.shipped} x ${r.sku} from ${(GD[r.godown]||{}).n||r.godown} to ${r.destination} via ${r.carrier}. Tracking ${r.tracking_id}.`:(r.reason||'');
+  $('b-act').innerHTML=r.tracking_id?`<button class="btn" onclick="setView('track');startTrack('${r.tracking_id}')">Track this shipment</button><button class="btn ghost" onclick="$('txt').focus();window.scrollTo(0,0)">Place another</button>`:''}
+function showResult(e){const r=e.result;step('result',r.status,e.t);finishBanner(r,e);
   if(r.status==='NO_ORDER'){$('res').className='';$('res').textContent=e.text;return}
   const ok=r.status==='OK';
   $('res').className='label '+(ok?'ok':'part');
@@ -341,16 +468,16 @@ function showResult(e){const r=e.result;step('result',r.status,e.t);
   $('meter').innerHTML=`<div>language-model calls<b>${r.llm_calls}</b></div><div>problems fixed<b>${(r.healed||[]).length}</b></div><div class="v">lessons used<b>${(r.learned||[]).length}</b></div>`}
 
 async function refresh(){const s=await (await fetch('/api/state')).json();
-  renderBiz(s.finance);$('st-ship').textContent=s.dispatched;$('recent').innerHTML=s.shipments.slice(0,4).map(x=>`<button class="chip" data-trk="${x.tracking_id}">${x.tracking_id}</button>`).join('')||'<span class="hint">Shipments appear here after dispatch.</span>';document.querySelectorAll('[data-trk]').forEach(b=>b.onclick=()=>{$('tid').value=b.dataset.trk;startTrack(b.dataset.trk)});$('st-les').textContent=s.lesson_count;
+  renderBiz(s.finance);loadCatalog();$('st-ship').textContent=s.dispatched;$('recent').innerHTML=s.shipments.slice(0,4).map(x=>`<button class="chip" data-trk="${x.tracking_id}">${x.tracking_id}</button>`).join('')||'<span class="hint">Shipments appear here after dispatch.</span>';document.querySelectorAll('[data-trk]').forEach(b=>b.onclick=()=>{$('tid').value=b.dataset.trk;startTrack(b.dataset.trk)});$('st-les').textContent=s.lesson_count;
   const skus=[...new Set(s.stock.map(x=>x.sku))],gds=['GD-BLR','GD-CHN','GD-HYD'];
   $('stock').innerHTML=s.stock.length?skus.map(k=>`<div class="sku"><b>${k}</b><div class="bars">`+gds.map(g=>{const q=(s.stock.find(x=>x.sku===k&&x.godown===g)||{}).qty||0;
     return `<div class="bar ${q===0?'z':''}"><i style="width:${Math.min(100,q/3)}%"></i><span>${q}</span></div>`}).join('')+`</div></div>`).join(''):'<div class="empty">Stock appears after the first order.</div>';
-  $('lessons').innerHTML=s.lessons.length?s.lessons.slice().reverse().map(l=>`<div class="lesson"><b>${l.stage}</b>${esc(l.problem)}<br><em>${esc(l.fix)}</em></div>`).join(''):'<div class="empty">Nothing learned yet. Fixes appear here and get reused.</div>'}
+  $('stock2').innerHTML=$('stock').innerHTML;$('lessons').innerHTML=s.lessons.length?s.lessons.slice().reverse().map(l=>`<div class="lesson"><b>${l.stage}</b>${esc(l.problem)}<br><em>${esc(l.fix)}</em></div>`).join(''):'<div class="empty">Nothing learned yet. Fixes appear here and get reused.</div>'}
 function stopTrack(){clearInterval(trkTimer);trkTimer=null;truck=null;$('trackbox').hidden=true}
 async function startTrack(id){id=(id||'').trim().toUpperCase();if(!id)return;clearInterval(trkTimer);
   const tick=async()=>{const r=await fetch('/api/track/'+encodeURIComponent(id));
-    if(!r.ok){$('trackbox').hidden=false;$('trk-id').textContent=id;$('trk-eta').textContent='No shipment with that tracking ID.';$('trk-tl').innerHTML='';clearInterval(trkTimer);return}
-    const t=await r.json(),s=t.shipment;$('trackbox').hidden=false;$('trk-id').textContent=s.tracking_id;
+    if(!r.ok){$('track-empty').hidden=true;$('trackbox').hidden=false;$('trk-id').textContent=id;$('trk-eta').textContent='No shipment with that tracking ID.';$('trk-tl').innerHTML='';clearInterval(trkTimer);return}
+    const t=await r.json(),s=t.shipment;$('trackbox').hidden=false;$('track-empty').hidden=true;$('trk-src').innerHTML=t.source?(t.source.mime.startsWith('image')?`<img src="${t.source.url}" alt="Original order" style="max-width:100%;max-height:120px;border:1px solid var(--line)">`:`<audio controls src="${t.source.url}" style="width:100%"></audio>`)+'<div class="hint">Original order, saved</div>':'';$('trk-id').textContent=s.tracking_id;
     $('trk-eta').textContent=t.delivered?'Delivered to '+s.destination:`${t.remaining_hours} h to ${s.destination} (${s.carrier})`;
     $('trk-tl').innerHTML=t.steps.map(x=>`<li class="${x.done?'d':''}"><i></i><span>${esc(x.label)}</span></li>`).join('');
     route={from:t.from,to:t.to};truck=t.position;src=s.godown;drawMap();if(t.delivered)clearInterval(trkTimer)};
@@ -358,6 +485,16 @@ async function startTrack(id){id=(id||'').trim().toUpperCase();if(!id)return;cle
 $('trackgo').onclick=()=>startTrack($('tid').value);
 $('tid').onkeydown=e=>{if(e.key==='Enter')startTrack($('tid').value)};
 const inr=n=>'Rs '+Math.round(n).toLocaleString('en-IN');
+async function loadCatalog(){const c=await (await fetch('/api/catalog')).json();const ks=Object.keys(c);
+  $('cat').innerHTML='<table class="ctab"><tr><th>Product</th><th>Price</th><th>Cost</th><th>Margin/unit</th><th>In stock</th></tr>'+ks.map(k=>{const v=c[k];
+    return `<tr><td><b>${esc(k)}</b> <span style="color:var(--mute)">${esc(v.name)}</span></td><td>${inr(v.price)}</td><td>${inr(v.cost)}</td><td>${inr(v.price-v.cost)}</td><td class="${v.stock<20?'low':''}">${v.stock}${v.stock<20?' low':''}</td></tr>`}).join('')+'</table>';
+  const cur=$('r-sku').value;$('r-sku').innerHTML=ks.map(k=>`<option value="${esc(k)}">${esc(k)}</option>`).join('');if(cur&&ks.includes(cur))$('r-sku').value=cur}
+function imsg(t,ok){const m=$('inv-msg');m.textContent=t;m.className='msg '+(ok?'ok':'err')}
+async function post(u,b){return (await fetch(u,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(b)})).json()}
+$('f-restock').onsubmit=async e=>{e.preventDefault();const r=await post('/api/restock',{godown:$('r-gd').value,sku:$('r-sku').value,qty:+$('r-qty').value});
+  if(r.error)return imsg(r.error+(r.hint?'. '+r.hint:''),false);imsg(`Added ${r.added} x ${r.sku} at ${(GD[r.godown]||{}).n}. Now ${r.now} there.`,true);refresh()};
+$('f-item').onsubmit=async e=>{e.preventDefault();const r=await post('/api/item',{sku:$('i-sku').value,name:$('i-name').value,price:$('i-price').value,cost:$('i-cost').value,weight_kg:$('i-w').value,volume_l:$('i-v').value,godown:$('i-gd').value,qty:$('i-qty').value});
+  if(r.error)return imsg(r.error+(r.hint?'. '+r.hint:''),false);imsg(`Created ${r.created}${r.added?` and stocked ${r.added} units`:''}. You can order it now.`,true);$('f-item').reset();refresh()};
 function renderBiz(f){if(!f||!f.orders){$('kpis').innerHTML='<div class="empty">Revenue, costs and margin appear after the first dispatch.</div>';$('bizsplit').innerHTML='';$('bysku').innerHTML='';return}
   const pct=f.revenue?(f.margin/f.revenue*100).toFixed(1):0;
   $('kpis').innerHTML=`<div class="kpi"><small>Orders / units sold</small><b>${f.orders} / ${f.units}</b></div><div class="kpi"><small>Revenue</small><b>${inr(f.revenue)}</b></div><div class="kpi"><small>Product cost</small><b>${inr(f.product_cost)}</b></div><div class="kpi"><small>Shipping + packaging</small><b>${inr(f.shipping+f.packaging)}</b></div><div class="kpi ${f.margin<0?'neg':'m'}"><small>Profit (${pct}%)</small><b>${inr(f.margin)}</b></div><div class="kpi"><small>Shipping per order</small><b>${inr((f.shipping+f.packaging)/f.orders)}</b></div>`;
@@ -365,7 +502,21 @@ function renderBiz(f){if(!f||!f.orders){$('kpis').innerHTML='<div class="empty">
   $('bizsplit').innerHTML=`<div class="split"><i style="width:${w(f.product_cost)}%;background:var(--ink)"></i><i style="width:${w(f.shipping)}%;background:var(--yellow)"></i><i style="width:${w(f.packaging)}%;background:var(--violet)"></i><i style="width:${w(Math.max(f.margin,0))}%;background:var(--teal)"></i></div><div class="sk"><span><i style="background:var(--ink)"></i>product</span><span><i style="background:var(--yellow)"></i>carrier</span><span><i style="background:var(--violet)"></i>packaging</span><span><i style="background:var(--teal)"></i>profit</span></div>`;
   const mx=Math.max(...Object.values(f.by_sku).map(x=>x.revenue),1);
   $('bysku').innerHTML='<div style="margin-top:10px;font-size:12px;color:var(--mute)">Products sold</div>'+Object.entries(f.by_sku).map(([k,v])=>`<div class="unit"><b>${k}</b><div class="qbar"><i style="width:${v.revenue/mx*100}%;background:var(--teal)"></i></div><span>${v.units} units</span></div>`).join('')}
+/* ---- inventory assistant (second agent) ---- */
+const invSession='inv-'+Date.now();let cFile=null;
+$('c-attach').onclick=()=>$('c-file').click();
+$('c-file').onchange=async e=>{const f=e.target.files[0];if(f){cFile=await toB64(f);$('c-fname').textContent=f.name}};
+document.querySelectorAll('[data-p]').forEach(b=>b.onclick=()=>{$('c-in').value=b.dataset.p;$('c-in').focus()});
+function bub(cls,html){const d=document.createElement('div');d.className='bub '+cls;d.innerHTML=html;$('chat').appendChild(d);$('chat').scrollTop=1e6;return d}
+$('c-form').onsubmit=async e=>{e.preventDefault();const text=$('c-in').value.trim();if(!text&&!cFile)return;
+  bub('me',esc(text||'(attached file)'));const w=bub('bot','Working on it...');$('c-send').disabled=true;
+  const body={session:invSession,text,...(cFile?{file_b64:cFile.b64,mime:cFile.mime}:{})};$('c-in').value='';cFile=null;$('c-fname').textContent='';
+  try{const r=await (await fetch('/api/inventory-agent',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)})).json();
+    w.innerHTML=esc(r.reply||'No reply.')+(r.actions&&r.actions.length?'<div class="acts">'+r.actions.map(a=>`<span class="act ${a.error?'err':''}" title="${esc(JSON.stringify(a.args))}">${esc(a.tool)}${a.error?' failed':''}</span>`).join('')+`<span class="hint">${r.seconds}s</span></div>`:'')}
+  catch(_){w.textContent='Could not reach the inventory assistant.'}
+  $('c-send').disabled=false;refresh()};
 const esc=t=>String(t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+setView((location.hash||'#orders').slice(1).replace(/[^a-z]/g,'')||'orders');
 refresh();
 </script>
 </body>

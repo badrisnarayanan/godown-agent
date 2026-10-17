@@ -15,13 +15,27 @@ import sys
 sys.path.insert(0, str(ROOT / "mcp_server"))
 import warehouse_server as W  # reuse GODOWNS + geocoder for tracking positions
 
+UPLOADS = ROOT / "uploads"
+UPLOADS.mkdir(exist_ok=True)
+INDEX = UPLOADS / "index.json"  # tracking_id -> uploaded source file
+EXT = {"image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "audio/wav": "wav", "audio/mpeg": "mp3",
+       "audio/ogg": "ogg", "audio/mp4": "m4a", "audio/webm": "webm"}
+
 app = FastAPI()
 runner = InMemoryRunner(agent=root_agent, app_name="dash")
+from my_agent.inventory_agent import inventory_agent
+inv_runner = InMemoryRunner(agent=inventory_agent, app_name="inv")
 
 
 @app.get("/")
 def index():
     return FileResponse(ROOT / "dashboard.html")
+
+
+@app.get("/uploads/{name}")
+def uploaded(name: str):
+    f = UPLOADS / Path(name).name
+    return FileResponse(f) if f.exists() else JSONResponse({"error": "not found"}, status_code=404)
 
 
 @app.get("/samples/{name}")
@@ -99,10 +113,66 @@ def track(tid: str):
     move = max(0.0, min(1.0, (frac - 0.2) / 0.7))
     steps = [("Order received", 0), (f"Packed at {gname}", 0.08), ("Picked up by " + d["carrier"], 0.2),
              ("In transit", 0.35), ("Out for delivery", 0.9), ("Delivered", 1.0)]
-    return {"shipment": d, "progress": round(frac, 3), "remaining_hours": round(d["eta_hours"] * (1 - frac), 1),
+    idx = json.loads(INDEX.read_text()) if INDEX.exists() else {}
+    return {"source": idx.get(d["tracking_id"]), "shipment": d, "progress": round(frac, 3), "remaining_hours": round(d["eta_hours"] * (1 - frac), 1),
             "delivered": frac >= 1, "from": [glat, glon], "to": list(dest),
             "position": [glat + (dest[0] - glat) * move, glon + (dest[1] - glon) * move],
             "steps": [{"label": l, "done": frac >= t} for l, t in steps]}
+
+
+@app.get("/api/catalog")
+def catalog():
+    return W.list_catalog()
+
+
+@app.post("/api/restock")
+async def api_restock(req: Request):
+    b = await req.json()
+    return W.restock(b.get("godown", ""), b.get("sku", ""), int(b.get("qty", 0) or 0))
+
+
+@app.post("/api/item")
+async def api_item(req: Request):
+    b = await req.json()
+    try:
+        return W.add_item(b["sku"], b["name"], float(b["weight_kg"]), float(b["volume_l"]), float(b["price"]),
+                          float(b["cost"]), b.get("godown", "GD-BLR"), int(b.get("qty", 0) or 0))
+    except (KeyError, ValueError) as e:
+        return {"error": f"invalid input: {e}"}
+
+
+@app.post("/api/inventory-agent")
+async def inventory_chat(req: Request):
+    """Chat with the inventory manager agent. A client-held session id keeps confirmations in context."""
+    b = await req.json()
+    sid = b.get("session") or "default"
+    if not await inv_runner.session_service.get_session(app_name="inv", user_id="u", session_id=sid):
+        await inv_runner.session_service.create_session(app_name="inv", user_id="u", session_id=sid)
+    parts = []
+    if b.get("file_b64"):
+        raw = base64.b64decode(b["file_b64"])
+        name = f"inv-{int(time.time())}-{os.urandom(3).hex()}.{EXT.get(b['mime'], 'bin')}"
+        (UPLOADS / name).write_bytes(raw)
+        parts.append(types.Part.from_bytes(data=raw, mime_type=b["mime"]))
+    parts.append(types.Part(text=b.get("text") or "Process the attached document."))
+    actions, reply = [], ""
+    t0 = time.time()
+    try:
+        async for e in inv_runner.run_async(user_id="u", session_id=sid, new_message=types.Content(role="user", parts=parts)):
+            for fc in e.get_function_calls() or []:
+                actions.append({"tool": fc.name, "args": dict(fc.args)})
+            for fr in e.get_function_responses() or []:
+                try:
+                    out = json.loads(fr.response["content"][0]["text"])
+                except Exception:
+                    out = {}
+                if actions:
+                    actions[-1]["error"] = out.get("error")
+            if e.is_final_response() and e.content and e.content.parts and e.content.parts[0].text:
+                reply = e.content.parts[0].text
+    except Exception as ex:
+        reply = f"The inventory agent hit an error: {repr(ex)[:160]}"
+    return {"reply": reply, "actions": actions, "seconds": round(time.time() - t0, 1)}
 
 
 @app.post("/api/reset")
@@ -115,9 +185,12 @@ def reset():
 @app.post("/api/order")
 async def order(req: Request):
     body = await req.json()
-    parts = []
+    parts, saved = [], None
     if body.get("file_b64"):
-        parts.append(types.Part.from_bytes(data=base64.b64decode(body["file_b64"]), mime_type=body["mime"]))
+        raw = base64.b64decode(body["file_b64"])
+        saved = f"{int(time.time())}-{os.urandom(3).hex()}.{EXT.get(body['mime'], 'bin')}"
+        (UPLOADS / saved).write_bytes(raw)  # keep the original order document / voice note
+        parts.append(types.Part.from_bytes(data=raw, mime_type=body["mime"]))
         parts.append(types.Part(text=body.get("text") or "Process this order."))
     else:
         parts.append(types.Part(text=body.get("text", "")))
@@ -126,6 +199,8 @@ async def order(req: Request):
         t0 = time.time()
         s = await runner.session_service.create_session(app_name="dash", user_id="u", state={"FLAKY_CARRIER": "1" if body.get("chaos", True) else "0"})
         send = lambda d: f"data: {json.dumps(d)}\n\n"
+        if saved:
+            yield send({"kind": "saved", "url": f"/uploads/{saved}", "mime": body["mime"], "t": 0})
         try:
             async for e in runner.run_async(user_id="u", session_id=s.id, new_message=types.Content(role="user", parts=parts)):
                 el = round(time.time() - t0, 2)
@@ -135,7 +210,12 @@ async def order(req: Request):
                 elif e.custom_metadata:
                     yield send({**e.custom_metadata, "t": el})
                 if e.actions and e.actions.state_delta and "result" in e.actions.state_delta:
-                    yield send({"kind": "result", "result": e.actions.state_delta["result"], "text": txt, "t": el})
+                    res = e.actions.state_delta["result"]
+                    if saved and res.get("tracking_id"):
+                        idx = json.loads(INDEX.read_text()) if INDEX.exists() else {}
+                        idx[res["tracking_id"]] = {"url": f"/uploads/{saved}", "mime": body["mime"]}
+                        INDEX.write_text(json.dumps(idx))
+                    yield send({"kind": "result", "result": res, "text": txt, "t": el})
         except Exception as ex:
             yield send({"kind": "error", "detail": repr(ex)[:200]})
         yield send({"kind": "end", "t": round(time.time() - t0, 2)})

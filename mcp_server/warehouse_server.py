@@ -59,6 +59,10 @@ def _init():
     c = db()
     c.execute("CREATE TABLE IF NOT EXISTS stock(godown TEXT, sku TEXT, qty INT, PRIMARY KEY(godown, sku))")
     c.execute("CREATE TABLE IF NOT EXISTS shipments(id TEXT PRIMARY KEY, data TEXT, created REAL)")
+    c.execute("CREATE TABLE IF NOT EXISTS catalog(sku TEXT PRIMARY KEY, name TEXT, weight REAL, volume REAL, price REAL, cost REAL)")
+    if not c.execute("SELECT 1 FROM catalog LIMIT 1").fetchone():
+        for k, (n, w, v) in SKUS.items():
+            c.execute("INSERT INTO catalog VALUES(?,?,?,?,?,?)", (k, n, w, v, *PRICES[k]))
     if not c.execute("SELECT 1 FROM stock LIMIT 1").fetchone():
         for g, items in STOCK.items():
             for s, q in items.items():
@@ -68,6 +72,13 @@ def _init():
 
 
 _init()
+
+
+def _catalog():
+    c = db()
+    rows = {r["sku"]: dict(r) for r in c.execute("SELECT * FROM catalog")}
+    c.close()
+    return rows
 
 
 def _hav(a, b):
@@ -107,7 +118,7 @@ def check_stock(sku: str, qty: int, destination: str) -> dict:
     rows = c.execute("SELECT godown, qty FROM stock WHERE sku=?", (sku,)).fetchall()
     c.close()
     if not rows:
-        return {"error": f"unknown sku {sku}", "known_skus": list(SKUS)}
+        return {"error": f"unknown sku {sku}", "known_skus": list(_catalog())}
     out = []
     for r in rows:
         g = GODOWNS[r["godown"]]
@@ -136,9 +147,10 @@ def reserve_stock(godown: str, sku: str, qty: int) -> dict:
 @mcp.tool()
 def select_box(sku: str, qty: int) -> dict:
     """Choose the cheapest box that fits total weight and volume for the order."""
-    if sku not in SKUS:
+    cat = _catalog()
+    if sku not in cat:
         return {"error": f"unknown sku {sku}"}
-    _, w, v = SKUS[sku]
+    w, v = cat[sku]["weight"], cat[sku]["volume"]
     tw, tv = round(w * qty * 1.1, 2), round(v * qty * 1.15, 2)  # padding
     for bid, mw, mv, cost in BOXES:
         if tw <= mw and tv <= mv:
@@ -210,7 +222,8 @@ def create_shipment(order_id: str, customer: str, destination: str, godown: str,
     tid = "TRK" + uuid.uuid4().hex[:8].upper()
     data = dict(tracking_id=tid, order_id=order_id, customer=customer, destination=destination, godown=godown,
                 sku=sku, qty=qty, box=box, carrier=carrier, price=price, eta_hours=eta_hours, status="DISPATCHED")
-    sell, cost = PRICES.get(sku, (0, 0))
+    cat = _catalog().get(sku, {})
+    sell, cost = cat.get("price", 0), cat.get("cost", 0)
     data.update(revenue=sell * qty, product_cost=cost * qty, shipping_cost=round(price, 2), packaging_cost=box_cost)
     c = db()
     c.execute("INSERT INTO shipments VALUES(?,?,?)", (tid, json.dumps(data), time.time()))
@@ -219,6 +232,102 @@ def create_shipment(order_id: str, customer: str, destination: str, godown: str,
     data["notification"] = (f"Hi {customer}, your order {order_id} ({qty} x {sku}) is dispatched via {carrier}. "
                             f"Tracking {tid}, ETA ~{eta_hours}h.")
     return data
+
+
+@mcp.tool()
+def list_catalog() -> dict:
+    """All products with price, cost, weight, volume and total stock across godowns."""
+    c = db()
+    tot = {r["sku"]: r["t"] for r in c.execute("SELECT sku, SUM(qty) t FROM stock GROUP BY sku")}
+    c.close()
+    return {k: {**v, "stock": tot.get(k, 0)} for k, v in _catalog().items()}
+
+
+@mcp.tool()
+def restock(godown: str, sku: str, qty: int) -> dict:
+    """Add `qty` units of an existing product to a godown."""
+    if godown not in GODOWNS:
+        return {"error": f"unknown godown {godown}", "godowns": list(GODOWNS)}
+    if sku not in _catalog():
+        return {"error": f"unknown sku {sku}", "hint": "use add_item to create a new product"}
+    if qty <= 0:
+        return {"error": "qty must be positive"}
+    c = db()
+    c.execute("INSERT INTO stock VALUES(?,?,?) ON CONFLICT(godown, sku) DO UPDATE SET qty = qty + ?", (godown, sku, qty, qty))
+    c.commit()
+    now = c.execute("SELECT qty FROM stock WHERE godown=? AND sku=?", (godown, sku)).fetchone()["qty"]
+    c.close()
+    return {"godown": godown, "sku": sku, "added": qty, "now": now}
+
+
+@mcp.tool()
+def add_item(sku: str, name: str, weight_kg: float, volume_l: float, price: float, cost: float,
+             godown: str = "GD-BLR", qty: int = 0) -> dict:
+    """Create a new product in the catalog and optionally stock it in a godown."""
+    sku = sku.strip().upper()
+    if not sku or sku in _catalog():
+        return {"error": f"sku '{sku}' is empty or already exists", "hint": "use restock for existing products"}
+    if min(weight_kg, volume_l, price, cost) < 0 or weight_kg == 0 or volume_l == 0:
+        return {"error": "weight, volume must be > 0; price and cost must be >= 0"}
+    c = db()
+    c.execute("INSERT INTO catalog VALUES(?,?,?,?,?,?)", (sku, name.strip(), weight_kg, volume_l, price, cost))
+    for g in GODOWNS:  # every godown gets a row so it shows up in the stock table
+        c.execute("INSERT OR IGNORE INTO stock VALUES(?,?,0)", (g, sku))
+    c.commit()
+    c.close()
+    if qty > 0:
+        return {"created": sku, **restock(godown, sku, qty)}
+    return {"created": sku}
+
+
+@mcp.tool()
+def remove_item(sku: str, force: bool = False) -> dict:
+    """Delete a product from the catalog. Refuses if units are still in stock unless force=True."""
+    sku = sku.strip().upper()
+    if sku not in _catalog():
+        return {"error": f"unknown sku {sku}"}
+    c = db()
+    left = c.execute("SELECT COALESCE(SUM(qty),0) t FROM stock WHERE sku=?", (sku,)).fetchone()["t"]
+    if left > 0 and not force:
+        c.close()
+        return {"error": f"{left} units of {sku} are still in stock", "hint": "get the user's confirmation, then call again with force=true"}
+    c.execute("DELETE FROM stock WHERE sku=?", (sku,))
+    c.execute("DELETE FROM catalog WHERE sku=?", (sku,))
+    c.commit()
+    c.close()
+    return {"removed": sku, "units_discarded": left}
+
+
+@mcp.tool()
+def update_item(sku: str, name: str = "", price: float = -1, cost: float = -1,
+                weight_kg: float = -1, volume_l: float = -1) -> dict:
+    """Change a product's name, selling price, unit cost, weight or volume. Only fields you pass are changed."""
+    sku = sku.strip().upper()
+    if sku not in _catalog():
+        return {"error": f"unknown sku {sku}"}
+    fields = {"name": name.strip() or None, "price": price if price >= 0 else None, "cost": cost if cost >= 0 else None,
+              "weight": weight_kg if weight_kg > 0 else None, "volume": volume_l if volume_l > 0 else None}
+    fields = {k: v for k, v in fields.items() if v is not None}
+    if not fields:
+        return {"error": "nothing to change", "hint": "pass at least one of name, price, cost, weight_kg, volume_l"}
+    c = db()
+    c.execute("UPDATE catalog SET " + ", ".join(f"{k}=?" for k in fields) + " WHERE sku=?", (*fields.values(), sku))
+    c.commit()
+    c.close()
+    return {"updated": sku, **fields}
+
+
+@mcp.tool()
+def remove_stock(godown: str, sku: str, qty: int, reason: str = "write-off") -> dict:
+    """Remove `qty` units from a godown (damage, loss, transfer out). Cannot go below zero."""
+    c = db()
+    cur = c.execute("UPDATE stock SET qty=qty-? WHERE godown=? AND sku=? AND qty>=? AND ?>0", (qty, godown, sku, qty, qty))
+    c.commit()
+    row = c.execute("SELECT qty FROM stock WHERE godown=? AND sku=?", (godown, sku)).fetchone()
+    c.close()
+    if cur.rowcount == 0:
+        return {"error": f"cannot remove {qty} x {sku} from {godown}", "available": row["qty"] if row else 0}
+    return {"godown": godown, "sku": sku, "removed": qty, "reason": reason, "now": row["qty"]}
 
 
 @mcp.tool()

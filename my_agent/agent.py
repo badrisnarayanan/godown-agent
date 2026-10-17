@@ -29,24 +29,44 @@ def _j(v):
         return {}
 
 
-intake = Agent(
-    name="intake", model=MODEL, output_key="order", generate_content_config=FAST,
-    instruction=(
+def _intake_instruction(ctx):
+    cat = read_catalog(_db_path(ctx.state))
+    return (
         "You are the order-intake agent (the ONLY LLM step). The user supplies a purchase order as an IMAGE "
         "(photo/scan/handwritten), a VOICE RECORDING (transcribe it mentally and extract), or text. Output ONLY compact JSON: "
         '{"order_id","customer","destination","sku","qty"}. '
-        "Valid SKUs: LAPTOP-15, MOUSE-WL, KEYBOARD-MX, MONITOR-24 - map product names to the closest SKU. "
-        "If order_id is missing invent 'ORD-' + 4 digits."))
+        "Valid SKUs (map product names to the closest one): "
+        + "; ".join(f"{k} = {v}" for k, v in cat.items())
+        + ". If order_id is missing invent 'ORD-' + 4 digits.")
+
+
+intake = Agent(name="intake", model=MODEL, output_key="order", generate_content_config=FAST,
+               instruction=_intake_instruction)
 
 CARRIERS = ["FastFreight", "BlueDart-Mock", "EcoMove"]
 
 
-SKU_LIST = ["LAPTOP-15", "MOUSE-WL", "KEYBOARD-MX", "MONITOR-24"]
+def _db_path(state):
+    return state.get("WAREHOUSE_DB") or str(ROOT / "mcp_server" / "warehouse.db")
+
+
+def read_catalog(db_path):
+    """Product catalog straight from the warehouse DB (so newly added products work everywhere)."""
+    import sqlite3
+    try:
+        c = sqlite3.connect(db_path)
+        rows = {sku: name for sku, name in c.execute("SELECT sku, name FROM catalog")}
+        c.close()
+        if rows:
+            return rows
+    except Exception:
+        pass
+    return {"LAPTOP-15": "15in Laptop", "MOUSE-WL": "Wireless Mouse", "KEYBOARD-MX": "Mechanical Keyboard", "MONITOR-24": "24in Monitor"}
+
+
 
 
 CITIES = ["Chennai", "Bengaluru", "Hyderabad", "Mumbai", "Delhi", "Kolkata", "Coimbatore", "Madurai", "Pune", "Kochi"]
-SKU_DESC = {"LAPTOP-15": "laptops, notebooks, computers", "MOUSE-WL": "mice, pointing devices, cursors",
-            "KEYBOARD-MX": "keyboards, typing devices", "MONITOR-24": "monitors, screens, displays"}
 JEV_MIN_CONF = 0.45
 
 
@@ -71,7 +91,7 @@ async def _gemini_json(prompt):
     return _j(r.text)
 
 
-async def heal(kind, context):
+async def heal(kind, context, catalog=None):
     """EXCEPTION-HEALER AGENT, called only when deterministic recovery is exhausted.
     Primary brain: Jev (TypeSafe System One) - fast typed Choice decisions with confidence.
     Confidence-gated: low confidence / error / no key -> falls back to Gemini. Returns a decision dict."""
@@ -86,7 +106,7 @@ async def heal(kind, context):
         elif kind in ("unknown_sku", "stock_shortfall"):
             a = await asyncio.to_thread(_jev_sync, state, {
                 "sku": {"type": "choice", "instructions": "Which catalog product best matches the ordered item?",
-                        "criteria": dict(SKU_DESC)},
+                        "criteria": dict(catalog or read_catalog(""))},
                 "action": {"type": "choice", "instructions": "Best way to handle this stock exception",
                            "criteria": {"substitute": "Item name is unknown/unmatched: map to a catalog product",
                                         "backorder": "Item is a valid product but stock is short: backorder the rest"}}})
@@ -102,7 +122,7 @@ async def heal(kind, context):
         context = {**context, "_jev_error": str(e)[:80]}
     prompt = (
         f"You are the exception-healer of a logistics system. Failure: {kind}. Context: {json.dumps(context)}\n"
-        "Valid SKUs: LAPTOP-15, MOUSE-WL, KEYBOARD-MX, MONITOR-24. Reply ONLY JSON, one of: "
+        f"Valid SKUs: {json.dumps(catalog or read_catalog(''))}. Reply ONLY JSON, one of: "
         '{"action":"fix_address","city":"<city>"} | {"action":"substitute","sku":"<valid sku>","reason":"..."} | '
         '{"action":"backorder","reason":"..."} | {"action":"escalate","reason":"..."}')
     d = await _gemini_json(prompt)
@@ -122,6 +142,7 @@ class FulfilmentEngine(BaseAgent):
         res = {"status": "FAILED", "healed": healed, "llm_calls": 1}
         env = {k: state[k] for k in ("WAREHOUSE_DB", "LESSONS_FILE", "FLAKY_CARRIER") if state.get(k)}
         env |= {k: os.environ[k] for k in ("GOOGLE_MAPS_API_KEY", "USE_REAL_MAPS") if os.environ.get(k)}
+        catalog = read_catalog(_db_path(state))
         try:
             sku, qty, dest = order["sku"], int(order["qty"]), order["destination"]
         except Exception:
@@ -172,8 +193,8 @@ class FulfilmentEngine(BaseAgent):
             stock = await call("check_stock", sku=sku, qty=qty, destination=dest)
             if "error" in stock and "unknown sku" in stock["error"]:
                 llm_calls += 1
-                d = await heal("unknown_sku", {"sku": sku, "order": order})
-                if d.get("action") == "substitute" and d.get("sku") in SKU_LIST:
+                d = await heal("unknown_sku", {"sku": sku, "order": order}, catalog)
+                if d.get("action") == "substitute" and d.get("sku") in catalog:
                     await lesson("godown", f"unknown sku {sku}", f"healer({d.get('via')}) substituted {d['sku']} ({d.get('reason')})")
                     sku = d["sku"]
                     stock = await call("check_stock", sku=sku, qty=qty, destination=dest)
@@ -209,8 +230,8 @@ class FulfilmentEngine(BaseAgent):
                 await lesson("godown", f"no single godown had {qty} x {sku}", f"split across {picks}")
             if need > 0:  # unrecoverable stock shortfall -> healer decides
                 llm_calls += 1
-                d = await heal("stock_shortfall", {"sku": sku, "qty": qty, "short_by": need, "ranked": ranked})
-                if d.get("action") == "substitute" and d.get("sku") in SKU_LIST and d["sku"] != sku:
+                d = await heal("stock_shortfall", {"sku": sku, "qty": qty, "short_by": need, "ranked": ranked}, catalog)
+                if d.get("action") == "substitute" and d.get("sku") in catalog and d["sku"] != sku:
                     # keep it simple and safe: report the substitution proposal, ship what we have
                     await lesson("godown", f"{sku} short by {need}", f"healer proposed {d['sku']}: {d.get('reason')}")
                 else:
