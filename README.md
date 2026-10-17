@@ -18,6 +18,9 @@ The **Guardian agent** (an A2A service) masks identifiers before any model sees 
 | `card 4111 1111 1111 1111` | `card [CARD ••••1111]` |
 | `UPI asha@okhdfcbank, mail asha@gmail.com` | `UPI [UPI], mail [EMAIL]` |
 | `IFSC HDFC0001234, account number 123456789012` | `IFSC [IFSC], account number [ACCOUNT ••••9012]` |
+| `card 4111.1111.1111.1111`, `aadhaar 2341/2341/2346` | `card [CARD ••••1111]`, `aadhaar [AADHAAR ••••2346]` (any separator) |
+| `pan abcde1234f` | `pan [PAN]` |
+| `passport K1234567, voter ABC1234567` | `passport [PASSPORT], voter [VOTER ID]` |
 | `5 monitors to Chennai, order 5150` | unchanged: no personal data |
 
 Business guardrails are enforced in code: delivery within India only, electronics only, and destructive inventory actions need a human click.
