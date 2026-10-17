@@ -17,6 +17,9 @@ DB = os.environ.get("WAREHOUSE_DB", str(ROOT / "warehouse.db"))
 LESSONS = Path(os.environ.get("LESSONS_FILE", ROOT / "lessons.json"))
 FAIL_STATE = Path(DB + ".fail")  # planted-failure bookkeeping (per-DB so evals are isolated)
 
+import threading
+_FAIL_LOCK = threading.Lock()
+
 mcp = MCPServer("warehouse")
 
 # ---- input validation: tools are callable by LLMs, so never trust their arguments ----
@@ -303,9 +306,13 @@ def get_carrier_quote(carrier: str, distance_km: float, weight_kg: float) -> dic
     if carrier not in CARRIERS:
         return {"error": f"unknown carrier {carrier}", "carriers": list(CARRIERS)}
     if carrier == "FastFreight" and os.environ.get("FLAKY_CARRIER", "1") == "1":
-        st = json.loads(FAIL_STATE.read_text()) if FAIL_STATE.exists() else {"n": 0}
-        st["n"] += 1
-        FAIL_STATE.write_text(json.dumps(st))
+        with _FAIL_LOCK:  # hedged requests call this concurrently
+            try:
+                st = json.loads(FAIL_STATE.read_text()) if FAIL_STATE.exists() else {"n": 0}
+            except Exception:
+                st = {"n": 0}
+            st["n"] += 1
+            FAIL_STATE.write_text(json.dumps(st))
         if st["n"] % 3 == 1:
             return {"error": "503 Service Unavailable from FastFreight API",
                     "hint": "retry once, or fall back to another carrier"}

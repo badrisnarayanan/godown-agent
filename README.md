@@ -2,6 +2,10 @@
 
 Send an order as a **photo, voice note or text**. Vegam finds the stock, packs it, routes it, books the fastest carrier, dispatches it and texts the customer a tracking link, with nobody in between. If details are missing, it asks.
 
+![Vegam dashboard: a bad address healed, rerouted to Chennai, real Google Routes distance, customer text](docs/orders.jpg)
+
+*An order with an address nobody can geocode: healed, rerouted to the godown that has stock, routed with Google Routes, dispatched in 3.6 s with the customer text.*
+
 ## Run it
 ```
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
@@ -26,4 +30,4 @@ Orders (live step banner, map, pipeline with MCP tool names), Track (timeline an
 The LLM may propose, code and people decide: tool arguments are validated (positive bounded quantities, SKU format, markup stripped); the intake model has no tools and its JSON is re-validated; the inventory agent can only **queue** destructive actions, which need a human click; write endpoints need `ADMIN_TOKEN`; rate limits, upload size/type/magic-byte checks, security headers, and a validated map proxy protect cost and data. `security_suite.py` attacks a running server; its first admin and validation checks pass, but the full run is not yet complete (see Status).
 
 ## Status
-Tested: evals (11/11), end-to-end text, photo and voice orders, tracking, finance, inventory agent in the UI, real Google geocoding and Routes. Not yet tested end to end: the complete adversarial suite, the follow-up-question flow through the UI, mic recording, and the Cloud Run build of the latest code.
+Tested: evals (11/11), end-to-end text, photo and voice orders, tracking, finance, inventory agent in the UI, real Google geocoding and Routes. Fixed late: a race between hedged carrier requests that could crash an order (found by running the demo, now covered by a stress run of 6 orders). Not yet tested end to end: the complete adversarial suite, the follow-up-question flow through the UI, mic recording, and the Cloud Run build of the latest code.

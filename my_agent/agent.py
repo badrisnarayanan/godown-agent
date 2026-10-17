@@ -229,7 +229,10 @@ class FulfilmentEngine(BaseAgent):
 
             async def call(name, **kw):
                 out = await mcp.call_tool(name, kw)
-                return json.loads(out.content[0].text)
+                try:
+                    return json.loads(out.content[0].text)
+                except Exception:  # a tool crashed and returned plain text: surface it as an error the engine can retry
+                    return {"error": (out.content[0].text if out.content else "empty tool result")[:200]}
 
             async def past(stage):
                 out = await mcp.call_tool("get_lessons", {"stage": stage})
