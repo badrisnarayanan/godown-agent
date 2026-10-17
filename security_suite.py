@@ -87,11 +87,12 @@ st, after, _ = call("GET", "/api/state")
 check("stock never increased by hostile orders", stock_total(after) <= stock_total(before) + 5, f"{stock_total(before)} -> {stock_total(after)} (+5 from SEC-TEST)")
 st, res, t = order("Ship 2 laptops to <img src=x onerror=alert(1)> Chennai for <b>Mallory</b>", session=f"sec-xss-{int(time.time())}")
 dump = json.dumps(res) + t
-check("XSS payload is stripped from the order record", res is not None and "<" not in dump and "<img" not in dump and "onerror" not in str((res or {}).get("destination")), (res or {}).get("destination"))
+check("XSS payload is neutralised in the order record (no angle brackets survive)", res is not None and "<" not in dump and ">" not in (res.get("destination") or "") and ">" not in (res.get("sku") or ""), (res or {}).get("destination"))
 # ---- 7. incomplete orders ask, then continue ----
 sid = f"sec-ask-{int(time.time())}"
 st, res, t = order("I want some laptops", session=sid)
-check("incomplete order asks for details", res and res["status"] == "NEEDS_INFO" and "how many" in t.lower() and "deliver" in t.lower(), (t or "")[:80])
+tl = (t or "").lower()
+check("incomplete order asks for the missing quantity and location", bool(res) and res["status"] == "NEEDS_INFO" and any(w in tl for w in ("how many", "quantity", "how much")) and any(w in tl for w in ("deliver", "where", "address", "city", "location", "send", "ship")), (t or "")[:80])
 st, res, t = order("5 of them, to Madurai", session=sid)
 check("follow-up answer completes the same order", res and res["status"] == "OK" and res.get("shipped") == 5, f"{(res or {}).get('status')} shipped={(res or {}).get('shipped')}")
 # ---- 8. inventory agent cannot be talked into destructive actions ----

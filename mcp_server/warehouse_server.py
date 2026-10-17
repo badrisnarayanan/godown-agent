@@ -115,14 +115,25 @@ CARRIERS = {  # name -> (base, per_kg, per_km, speed_kmph)
 }
 
 
-def db():
+def _raw():
     c = sqlite3.connect(DB, timeout=10)
     c.row_factory = sqlite3.Row
     return c
 
 
+def db():
+    """Self-bootstrapping: a missing or empty database file (first start, or after a reset) is recreated with seed data."""
+    try:
+        needs = (not os.path.exists(DB)) or os.path.getsize(DB) == 0
+    except OSError:
+        needs = True
+    if needs:
+        _init()
+    return _raw()
+
+
 def _init():
-    c = db()
+    c = _raw()
     c.execute("CREATE TABLE IF NOT EXISTS stock(godown TEXT, sku TEXT, qty INT, PRIMARY KEY(godown, sku))")
     c.execute("CREATE TABLE IF NOT EXISTS shipments(id TEXT PRIMARY KEY, data TEXT, created REAL)")
     c.execute("CREATE TABLE IF NOT EXISTS pending(id TEXT PRIMARY KEY, action TEXT, args TEXT, summary TEXT, created REAL, status TEXT)")

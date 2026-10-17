@@ -127,6 +127,7 @@ def sample(name: str):
 @app.get("/api/state")
 def state(req: Request):
     stock, ships = [], []
+    W.db().close()  # make sure the tables exist (recreated after a reset)
     if DB.exists():
         c = sqlite3.connect(DB)
         stock = [dict(godown=g, sku=s, qty=q) for g, s, q in c.execute("SELECT godown,sku,qty FROM stock WHERE sku IN (SELECT sku FROM catalog) ORDER BY sku,godown")]
@@ -361,6 +362,8 @@ def cancel(pid: str):
 def reset():
     for f in (DB, LESSONS, Path(str(DB) + ".fail")):
         f.unlink(missing_ok=True)
+    W._GEO_CACHE.clear()
+    W.db().close()  # recreate tables and seed data right away
     return {"ok": True}
 
 
