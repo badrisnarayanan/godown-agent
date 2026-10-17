@@ -190,6 +190,13 @@ body:not([data-view="inv"]) #v-inv,body:not([data-view="biz"]) #v-biz{display:no
 .bub .act{font:600 11px ui-monospace,Menlo,monospace;border:1.5px solid var(--teal);color:var(--teal);padding:0 6px;background:#fff}
 .bub .act.err{border-color:var(--red);color:var(--red)}
 .cform textarea{min-height:52px}
+.chatbox{border:2px solid var(--ink);background:var(--paper)}
+.chathead{display:flex;gap:12px;align-items:baseline;padding:8px 12px;background:var(--ink);color:#fff}
+.chathead b{font:700 18px "Barlow Condensed";letter-spacing:.05em;color:var(--yellow)}.chathead .hint{color:#aebbc7}
+.thread{max-height:290px;min-height:90px;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:12px;background:#fff}
+.composer{border-top:2px solid var(--ink);padding:8px 10px;background:var(--paper)}
+.composer textarea{min-height:46px}
+.bub .chips{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}
 </style>
 </head>
 <body>
@@ -211,15 +218,7 @@ body:not([data-view="inv"]) #v-inv,body:not([data-view="biz"]) #v-biz{display:no
 
 <main id="live">
 <aside class="rail">
-  <div data-views="orders"><h2>Place an order</h2>
-  <textarea id="txt" aria-label="Order text" placeholder="e.g. 3 laptops to Chennai for Ravi"></textarea>
-  <input type="file" id="file" accept="image/*,audio/*" hidden>
-  <div class="row">
-    <button class="btn primary" id="go">Place order</button>
-    <button class="btn" id="mic">Speak an order</button>
-    <button class="btn" id="attach">Attach file</button>
-  </div>
-  <div id="fname" class="hint"></div></div>
+  <div data-views="orders"><h2>Scenarios</h2><div class="hint">One-click orders for the demo. They go through the same chat.</div></div>
 
   <div class="group" data-views="orders"><h3>Quick orders</h3>
     <div class="row">
@@ -251,6 +250,15 @@ body:not([data-view="inv"]) #v-inv,body:not([data-view="biz"]) #v-biz{display:no
 </aside>
 
 <section class="stage-area">
+  <div class="chatbox" data-views="orders">
+    <div class="chathead"><b>Order desk</b><span class="hint">Talk to Vegam like a customer would. It asks if anything is missing.</span></div>
+    <div class="thread" id="thread" aria-live="polite"></div>
+    <div class="composer">
+      <textarea id="txt" rows="2" aria-label="Message to Vegam" placeholder="Type your order, e.g. 2 laptops to Chennai for Ravi"></textarea>
+      <input type="file" id="file" accept="image/*,audio/*" hidden>
+      <div class="row"><button class="btn primary" id="go">Send</button><button class="btn" id="mic">Speak</button><button class="btn" id="attach">Attach photo</button><span id="fname" class="hint"></span></div>
+    </div>
+  </div>
   <div class="banner" id="banner" data-views="orders">
     <div class="b-top"><span class="b-step" id="b-step">Ready</span><span class="b-time" id="b-time"></span></div>
     <div class="b-title" id="b-title">Place an order to begin</div>
@@ -410,6 +418,7 @@ document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{$('txt').value=b
 document.querySelectorAll('[data-img]').forEach(b=>b.onclick=async()=>{const u=b.dataset.img;const blob=await (await fetch(u)).blob();
   const f=new File([blob],u.split('/').pop(),{type:u.endsWith('.wav')?'audio/wav':'image/png'});fileData=await toB64(f);$('txt').value='';$('fname').textContent='Attached: '+f.name;run()});
 $('go').onclick=run;
+$('txt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();run()}};
 $('reset').onclick=async()=>{await af('/api/reset',{method:'POST'});resetUI(true);refresh()};
 
 function resetUI(full){stopTrack();$('track-empty').hidden=false;oos={};src=null;route=null;D={};$('details').className='empty';$('details').textContent='Appears once an order is read.';showTab(false);drawMap();
@@ -417,6 +426,10 @@ function resetUI(full){stopTrack();$('track-empty').hidden=false;oos={};src=null
   $('log').innerHTML='<div class="empty">'+(full?'Memory and stock reset.':'Running...')+'</div>';$('res').className='empty';$('res').textContent=full?'No order yet.':'Dispatching...';$('meter').innerHTML=''}
 
 const Q=[];let busy=false,lastTotal=null;
+const thread=document.getElementById('thread');let thinkB=null;
+function tbub(cls,html){const d=document.createElement('div');d.className='bub '+cls;d.innerHTML=html;thread.appendChild(d);thread.scrollTop=1e6;return d}
+tbub('bot','Hi, I am Vegam. Tell me what to ship and where, in your own words. You can also send a photo of a purchase order or a voice note.');
+
 let orderSession='o-'+Math.random().toString(36).slice(2,10);
 const newOrderSession=()=>{orderSession='o-'+Math.random().toString(36).slice(2,10)};
 async function af(url,opts={},retry=true){const h={...(opts.headers||{}),'x-admin-token':sessionStorage.getItem('adm')||''};
@@ -431,12 +444,12 @@ function setView(v){document.body.dataset.view=v;document.querySelectorAll('[dat
 document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setView(b.dataset.go));
 /* ---- banner: one place that always says where the order is ---- */
 const STEPS={intake:[1,'Reading your order'],godown:[2,'Finding stock'],packroute:[3,'Packing and routing'],carrier:[4,'Choosing the fastest carrier'],result:[5,'Dispatching']};
-function banner(stage,detail){const x=STEPS[stage];if(!x)return;const b=$('banner');b.className='banner working';$('b-step').textContent='Step '+x[0]+' of 5';$('b-title').textContent=x[1];$('b-sub').textContent=detail||'';$('b-bar').style.width=(x[0]/5*100)+'%';$('b-act').innerHTML=''}
+function banner(stage,detail){const x=STEPS[stage];if(!x)return;if(thinkB)thinkB.textContent=`Step ${x[0]} of 5: ${x[1]}...`;const b=$('banner');b.className='banner working';$('b-step').textContent='Step '+x[0]+' of 5';$('b-title').textContent=x[1];$('b-sub').textContent=detail||'';$('b-bar').style.width=(x[0]/5*100)+'%';$('b-act').innerHTML=''}
 function showSrc(f,savedUrl){const el=$('srcprev');if(!f){el.hidden=true;return}const u=`data:${f.mime};base64,${f.b64}`;
   el.hidden=false;el.innerHTML=(f.mime.startsWith('image')?`<img src="${u}" alt="Uploaded order">`:`<audio controls src="${u}"></audio>`)+`<div><b>Your order, as received</b><small id="saved-note">${savedUrl?'Saved: '+esc(savedUrl):'Saving a copy...'}</small></div>`}
 
-async function run(){setView('orders');resetUI();$('go').disabled=true;showSrc(fileData);banner('intake','Reading what you sent. This is the only step that needs an AI model.');
-  const body={session:orderSession,text:$('txt').value,chaos:$('chaos').checked,...(fileData?{file_b64:fileData.b64,mime:fileData.mime}:{})};
+async function run(){const said=$('txt').value.trim()||(fileData?(fileData.mime.startsWith('audio')?'(voice note)':'(photo of an order)'):'');if(!said)return;setView('orders');tbub('me',esc(said));thinkB=tbub('bot','On it...');resetUI();$('go').disabled=true;showSrc(fileData);banner('intake','Reading what you sent. This is the only step that needs an AI model.');
+  const body={session:orderSession,text:$('txt').value,chaos:$('chaos').checked,...(fileData?{file_b64:fileData.b64,mime:fileData.mime}:{})};$('txt').value='';
   const r=await fetch('/api/order',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
   const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
   while(true){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
@@ -456,7 +469,7 @@ function handle(e){
   }
   else if(e.kind==='heal')logEv('heal','FIXED',e.detail,e.t);
   else if(e.kind==='learned')logEv('learned','REMEMBERED',e.detail,e.t);
-  else if(e.kind==='error'){logEv('heal','ERROR',e.detail,e.t);const b=$('banner');b.className='banner fail';$('b-title').textContent='Something went wrong';$('b-sub').textContent=e.detail}
+  else if(e.kind==='error'){if(thinkB){thinkB.textContent='Sorry, something went wrong on my side. Please try again.';thinkB=null}logEv('heal','ERROR',e.detail,e.t);const b=$('banner');b.className='banner fail';$('b-title').textContent='Something went wrong';$('b-sub').textContent=e.detail}
   else if(e.kind==='saved'){const n=$('saved-note');if(n)n.textContent='Saved a copy: '+e.url}
   else if(e.kind==='result')showResult(e);
   else if(e.kind==='end'){lastTotal=e.t;$('st-time').textContent=e.t.toFixed(1)}}
@@ -468,11 +481,17 @@ function finishBanner(r,e){const b=$('banner');const ok=r.status==='OK';b.classN
   $('b-sub').textContent=r.tracking_id?`${r.shipped} x ${r.sku} from ${(GD[r.godown]||{}).n||r.godown} to ${r.destination} via ${r.carrier}. Tracking ${r.tracking_id}.`:(r.reason||'');
   $('b-act').innerHTML=r.tracking_id?`<button class="btn" id="b-track">Track this shipment</button><button class="btn ghost" id="b-again">Place another</button>`:'';
   if(r.tracking_id){$('b-track').onclick=()=>{setView('track');startTrack(r.tracking_id)};$('b-again').onclick=()=>{$('txt').value='';$('txt').focus();window.scrollTo(0,0)}}}
-function askBanner(r){const b=$('banner');b.className='banner ask';$('b-step').textContent='Waiting for you';$('b-title').textContent='I need one more detail';$('b-sub').textContent=r.question;$('b-bar').style.width='100%';$('b-time').textContent='';
-  $('b-act').innerHTML=(r.options||[]).map((o,i)=>`<button class="btn" data-opt="${esc(o.split(' (').pop().replace(')',''))}">${esc(o)}</button>`).join('');
-  document.querySelectorAll('[data-opt]').forEach(x=>x.onclick=()=>{$('txt').value=x.dataset.opt;run()});
-  $('res').className='empty';$('res').textContent='Waiting for your answer.';$('txt').value='';$('txt').placeholder='Type the missing detail, or attach a photo or voice note';$('txt').focus()}
-function showResult(e){const r=e.result;if(r.status==='NEEDS_INFO'){askBanner(r);return}newOrderSession();$('txt').placeholder='e.g. 3 laptops to Chennai for Ravi';step('result',r.status,e.t);finishBanner(r,e);
+function askBanner(r){const b=$('banner');b.className='banner ask';$('b-step').textContent='Waiting for your reply';$('b-title').textContent='Vegam asked you a question';$('b-sub').textContent='Answer in the chat above.';$('b-bar').style.width='100%';$('b-time').textContent='';$('b-act').innerHTML='';
+  const chips=(r.options||[]).map(o=>`<button class="chip" data-opt="${esc(o.split(' (').pop().replace(')',''))}">${esc(o.split(' (')[0])}</button>`).join('');
+  (thinkB||tbub('bot','')).innerHTML=esc(r.question)+(chips?`<div class="chips">${chips}</div>`:'');thinkB=null;
+  thread.querySelectorAll('[data-opt]').forEach(x=>x.onclick=()=>{$('txt').value=x.dataset.opt;run()});
+  thread.scrollTop=1e6;$('res').className='empty';$('res').textContent='Waiting for your answer.';$('txt').focus()}
+function chatDone(r,e){let h;
+  if(r.status==='NO_ORDER')h=esc(e.text||'');
+  else if(r.tracking_id){h=`Done. ${esc(r.shipped)} x ${esc(r.sku)} from ${esc((GD[r.godown]||{}).n||r.godown)} to ${esc(r.destination)} via ${esc(r.carrier)}. Tracking ID <b>${esc(r.tracking_id)}</b>.`+(r.status==='PARTIAL'?' Only part of it was in stock, the rest is on backorder.':'')+`<div class="chips"><button class="chip" data-trk3="${esc(r.tracking_id)}">Track it</button></div>`}
+  else h=esc(r.reason||'I could not ship that order.');
+  (thinkB||tbub('bot','')).innerHTML=h;thinkB=null;thread.querySelectorAll('[data-trk3]').forEach(x=>x.onclick=()=>{setView('track');startTrack(x.dataset.trk3)});thread.scrollTop=1e6}
+function showResult(e){const r=e.result;if(r.status==='NEEDS_INFO'){askBanner(r);return}newOrderSession();$('txt').placeholder='e.g. 3 laptops to Chennai for Ravi';step('result',r.status,e.t);finishBanner(r,e);chatDone(r,e);
   if(r.status==='NO_ORDER'){$('res').className='';$('res').textContent=e.text;return}
   const ok=r.status==='OK';
   $('res').className='label '+(ok?'ok':'part');
