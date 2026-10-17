@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import re
 import sys
 import time
 import urllib.request
@@ -137,6 +138,23 @@ class FulfilmentEngine(BaseAgent):
                 out = await mcp.call_tool(name, kw)
                 return json.loads(out.content[0].text)
 
+            async def past(stage):
+                out = await mcp.call_tool("get_lessons", {"stage": stage})
+                return [json.loads(c.text) for c in out.content]
+
+            # LEARNING LOOP: read what earlier runs learned and apply it before acting
+            gl, dl = await asyncio.gather(past("godown"), past("dispatch"))
+            aliases = {}
+            for l in gl:
+                m1, m2 = re.search(r"address '(.+)' failed geocoding", l["problem"]), re.search(r"normalised to '(.+)'", l["fix"])
+                if m1 and m2:
+                    aliases[m1.group(1).lower()] = m2.group(1)
+            hot = {c for c in CARRIERS if any(f"{c} returned 503" in l["problem"] for l in dl)}
+            learned = []
+            if dest.lower() in aliases:
+                learned.append(f"address '{dest}' -> '{aliases[dest.lower()]}' (no healer call needed)")
+                dest = aliases[dest.lower()]
+
             async def lesson(stage, problem, fix):
                 healed.append(fix)
                 await call("save_lesson", stage=stage, problem=problem, fix=fix)
@@ -206,6 +224,13 @@ class FulfilmentEngine(BaseAgent):
 
             # 3. CARRIERS in parallel; heal by retry, then exclude ----------------------
             async def quote(c):
+                if c in hot:  # learned: this carrier flakes, so hedge with two parallel requests
+                    rs = await asyncio.gather(*[call("get_carrier_quote", carrier=c, distance_km=route["distance_km"],
+                                                     weight_kg=box["total_weight_kg"]) for _ in range(2)])
+                    good = [q for q in rs if "error" not in q]
+                    if good:
+                        learned.append(f"{c} flaked before -> hedged request, no retry round-trip")
+                        return good[0]
                 for attempt in range(3):
                     q = await call("get_carrier_quote", carrier=c, distance_km=route["distance_km"],
                                    weight_kg=box["total_weight_kg"])
@@ -231,9 +256,10 @@ class FulfilmentEngine(BaseAgent):
                               carrier=best["carrier"], price=best["price"], eta_hours=best["eta_hours"])
 
         status = "OK" if ship.get("tracking_id") and need == 0 else f"PARTIAL (backorder {need})"
-        heal_txt = "Self-healed: " + "; ".join(healed) if healed else "Clean run"
+        heal_txt = ("Self-healed: " + "; ".join(healed) if healed else "Clean run") + \
+            ("\nApplied lessons: " + "; ".join(learned) if learned else "")
         out = res | {"status": "OK" if need == 0 else "PARTIAL", "godown": primary, "sku": sku, "shipped": shipped,
-                     "carrier": best["carrier"], "tracking_id": ship.get("tracking_id"), "llm_calls": llm_calls,
+                     "learned": learned, "carrier": best["carrier"], "tracking_id": ship.get("tracking_id"), "llm_calls": llm_calls,
                      "engine_s": round(time.time() - t0, 2), "destination": dest}
         yield self._done(out, f"AUDIT {status} - engine {time.time() - t0:.1f}s (LLM calls: {llm_calls})\n"
                          + "\n".join("  - " + t for t in trace)

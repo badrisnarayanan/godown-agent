@@ -17,7 +17,7 @@ image | voice | text ─► [Intake agent: Gemini multimodal]  (1 LLM call)
 - **Multimodal**: purchase-order photos and voice notes handled by Gemini in the intake step.
 - **APIs**: Google Maps geocoding (`USE_REAL_MAPS=1` + `GOOGLE_MAPS_API_KEY`, offline fallback otherwise), carrier quote APIs, Jev decisions API.
 - **Self-healing**: flaky carrier retry then exclusion, out-of-stock godown rerouting, split orders, bad-address repair, backorder decisions.
-- **Learning loop**: every fix is saved to `lessons.json` and fed back into later runs.
+- **Learning loop**: every fix is saved to `lessons.json`; later runs read it and apply it (learned address aliases skip the healer call; carriers that flaked get hedged requests). `eval_suite.py` has a case proving run 2 is cheaper than run 1.
 - **Speed**: 1 LLM call on the happy path; parallel packaging/routing and carrier quotes. ~3s end to end.
 
 ## Run

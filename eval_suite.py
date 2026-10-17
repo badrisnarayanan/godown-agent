@@ -47,9 +47,23 @@ async def run_case(name, text, exp):
     return dict(name=name, ok=not fails and not err, secs=round(dt, 1), llm=res.get("llm_calls"), fails=fails, err=err,
                 healed=res.get("healed"))
 
+async def learning_case():
+    """Run the same bad-address order twice with a shared lessons file: run 2 must apply the lesson, skip the healer."""
+    d = tempfile.mkdtemp(); outs = []
+    for i in range(2):
+        r = InMemoryRunner(agent=root_agent, app_name="ev")
+        s = await r.session_service.create_session(app_name="ev", user_id="u", state={
+            "WAREHOUSE_DB": f"{d}/w{i}.db", "LESSONS_FILE": f"{d}/l.json", "FLAKY_CARRIER": "1"})
+        async for _ in r.run_async(user_id="u", session_id=s.id, new_message=types.Content(role="user", parts=[types.Part(text="PO ORD-9 Anu: 2 keyboards to Kovai (Peelamedu)")])):
+            pass
+        outs.append((await r.session_service.get_session(app_name="ev", user_id="u", session_id=s.id)).state.get("result", {}))
+    ok = outs[0].get("llm_calls") == 2 and outs[1].get("llm_calls") == 1 and bool(outs[1].get("learned"))
+    return dict(name="learns-across-runs", ok=ok, secs=outs[1].get("engine_s"), llm=f"{outs[0].get('llm_calls')}->{outs[1].get('llm_calls')}",
+                fails=[] if ok else [f"run1={outs[0].get('llm_calls')} run2={outs[1].get('llm_calls')} learned={outs[1].get('learned')}"], err=None, healed=outs[1].get("learned"))
+
 async def main():
     t0 = time.time()
-    out = await asyncio.gather(*[run_case(*c) for c in CASES])
+    out = await asyncio.gather(learning_case(), *[run_case(*c) for c in CASES])
     print(f"\n{'case':<18}{'result':<7}{'secs':>6}{'llm':>5}  notes")
     for o in out:
         print(f"{o['name']:<18}{'PASS' if o['ok'] else 'FAIL':<7}{o['secs']:>6}{str(o['llm']):>5}  {'; '.join(o['fails']) or o['err'] or ''} {o['healed'] or ''}")
