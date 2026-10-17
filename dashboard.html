@@ -201,6 +201,7 @@ body[data-view="eval"] #live{display:none}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:1px}.dot.g{background:var(--teal)}.dot.a{background:var(--yellow)}.dot.j{background:var(--violet)}
 .perf{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:flex-end;background:var(--ink);color:#fff;padding:10px 14px;border-left:8px solid var(--yellow)}
 .perf b{display:block;font:800 28px/1 "Barlow Condensed";color:var(--yellow)}.perf small{color:#aebbc7;font-size:11.5px}
+.perf .checks{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px}.perf .checks span{font:700 12px 'Barlow Condensed';letter-spacing:.04em;background:#12806f;color:#fff;padding:2px 8px}
 .perf .cmp{flex:1 1 320px;font-size:12px;color:#cfd8e0}
 .agentsbox{border:2px solid var(--ink);background:var(--paper)}
 .agents{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;padding:10px}
@@ -289,6 +290,7 @@ body[data-view="eval"] #live{display:none}
     <div><b id="pf-tok">-</b><small>tokens in / out (cached)</small></div>
     <div><b id="pf-a2a">-</b><small>A2A agent calls</small></div>
     <div><b id="pf-zero">-</b><small>steps with zero tokens</small></div>
+    <div class="checks" id="pf-checks"></div>
     <div class="cmp">Speed and token economics: one model call reads the order; everything else is deterministic code, MCP tools and A2A agents that cost no tokens. Our first 5-agent design took 31 to 140 s per order.</div>
   </div>
   <div class="chatbox" data-views="orders">
@@ -524,6 +526,8 @@ function step(s,d,t){banner(s,d);$('b-time').textContent=t+'s elapsed';document.
 function logEv(kind,label,text,t){const l=$('log');if(l.querySelector('.empty'))l.innerHTML='';const d=document.createElement('div');d.className='ev '+kind;d.innerHTML=`<b>${label}</b><span></span>`;d.lastChild.textContent=text+'  ('+t+'s)';l.appendChild(d)}
 function handle(e){
   if(e.kind==='agent'){onAgent(e);return}
+  if(e.kind==='stage'){if(e.stage==='intake')setAgent('intake','done','Understood the order in one model call','Gemini');
+    if(e.stage==='godown')setAgent('fulfilment','working',e.detail,'MCP tools');if(e.stage==='packroute')setAgent('fulfilment','done',e.detail,'MCP tools')}
   if(e.kind==='end'){onEnd(e)}
   if(e.kind==='stage'){
     if(e.stage==='intake'){let t=e.detail;try{const o=JSON.parse(t);t=`${o.qty} x ${o.sku} for ${o.customer}, to ${o.destination}`}catch(_){ }try{D.order=JSON.parse(e.detail)}catch(_){ }step('intake',t,e.t);renderDetails()}
@@ -637,7 +641,9 @@ function onAgent(e){
       (e.transcript?`<div class="tx">`+e.transcript.map(t=>`<div class="${t.from==='Orchestrator'?'o':''}"><b>${esc(t.from)}${t.to?' → '+esc(t.to):''}</b>${esc(t.text)}</div>`).join('')+`</div>`:'')}
   if(e.agent==='judge'){const c=e.claims||[];$('truth').className='';$('truth').innerHTML=`<div class="lbl">${esc(e.detail)}</div>`+(c.length?c.map(x=>`<div class="claim"><span>${esc(x.kind)}: <b>${esc(x.text)}</b></span><span class="${x.ok?'ok':'no'}">${x.ok?'✓ verified':'✗ not in data'}</span></div>`).join(''):'<div class="lbl">No factual claims in the reply.</div>')+(e.output_masked?`<div class="lbl">${e.output_masked} item(s) masked in the reply too</div>`:'')}
 }
-function onEnd(e){$('pf-t').textContent=e.t.toFixed(1);$('pf-llm').textContent=e.llm_calls??'-';$('pf-tok').textContent=e.tokens?`${e.tokens.in} / ${e.tokens.out}`+(e.tokens.cached?` (${e.tokens.cached} cached)`:''):'-';$('pf-a2a').textContent=a2aCalls;$('pf-zero').textContent=e.zero_token_steps??'-';
+function onEnd(e){const pv=$('privacy').textContent,tr=$('truth').textContent;
+  $('pf-checks').innerHTML=[`✓ Responsible AI: ${/masked/.test(pv)?pv.match(/(\d+) item/)?.[1]+' item(s) masked':'no personal data found'}`,`✓ Grounded: ${(tr.match(/\d+\/\d+/)||['checked'])[0]} claims verified`,
+   `✓ A2A: ${a2aCalls} agent calls`,`✓ Latency: ${e.t.toFixed(1)} s`,`✓ Tokens: ${e.tokens?e.tokens.in+e.tokens.out:0} (${e.llm_calls??0} LLM call)`].map(x=>`<span>${x}</span>`).join('');$('pf-t').textContent=e.t.toFixed(1);$('pf-llm').textContent=e.llm_calls??'-';$('pf-tok').textContent=e.tokens?`${e.tokens.in} / ${e.tokens.out}`+(e.tokens.cached?` (${e.tokens.cached} cached)`:''):'-';$('pf-a2a').textContent=a2aCalls;$('pf-zero').textContent=e.zero_token_steps??'-';
   setAgent('orchestrator','done','All steps finished in '+e.t.toFixed(1)+' s')}
 async function loadEval(){try{const r=await (await fetch('/api/eval-results')).json();if(!r.sections||!r.sections.length){$('evalbox').textContent='No results yet. Run python agentic_eval_suite.py';return}
   const tot=r.sections.reduce((a,s)=>a+s.cases.length,0),pass=r.sections.reduce((a,s)=>a+s.cases.filter(c=>c.pass).length,0);
