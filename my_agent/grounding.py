@@ -20,7 +20,8 @@ def verify(text: str, evidence, user_text: str = ""):
         claims.append({"kind": "tracking id", "text": m.group(0), "ok": m.group(0).lower() in ev})
     for m in re.finditer(r"\b[A-Z][A-Z0-9]{1,}-[A-Z0-9]{1,}\b", text or ""):
         if not m.group(0).startswith("TRK"):
-            claims.append({"kind": "product", "text": m.group(0), "ok": m.group(0).lower() in ev})
+            kind = "order id" if m.group(0).startswith("ORD-") else "product"
+            claims.append({"kind": kind, "text": m.group(0), "ok": m.group(0).lower() in ev})
     for m in re.finditer(r"(?<![\w.])\d[\d,]*(?:\.\d+)?", text or ""):
         n = m.group(0).replace(",", "").rstrip(".")
         claims.append({"kind": "number", "text": m.group(0), "ok": n in ev_digits or n in user})

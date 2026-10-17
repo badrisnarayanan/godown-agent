@@ -201,6 +201,8 @@ body[data-view="eval"] #live{display:none}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:1px}.dot.g{background:var(--teal)}.dot.a{background:var(--yellow)}.dot.j{background:var(--violet)}
 .perf{display:flex;flex-wrap:wrap;gap:6px 22px;align-items:flex-end;background:var(--ink);color:#fff;padding:10px 14px;border-left:8px solid var(--yellow)}
 .perf b{display:block;font:800 28px/1 "Barlow Condensed";color:var(--yellow)}.perf small{color:#aebbc7;font-size:11.5px}
+.tk{display:inline-block;margin-top:4px;font:700 11px ui-monospace,Menlo,monospace;padding:1px 6px;background:#e8f6f3;color:#0b5a4e;border:1px solid #12806f}
+.tk.used{background:#fff6db;color:#7a5600;border-color:#b07d00}
 .perf .checks{flex-basis:100%;display:flex;flex-wrap:wrap;gap:6px}.perf .checks span{font:700 12px 'Barlow Condensed';letter-spacing:.04em;background:#12806f;color:#fff;padding:2px 8px}
 .perf .cmp{flex:1 1 320px;font-size:12px;color:#cfd8e0}
 .agentsbox{border:2px solid var(--ink);background:var(--paper)}
@@ -287,11 +289,13 @@ body[data-view="eval"] #live{display:none}
   <div class="perf" data-views="orders" id="perf">
     <div><b id="pf-t">-</b><small>end to end, seconds</small></div>
     <div><b id="pf-llm">-</b><small>LLM calls</small></div>
-    <div><b id="pf-tok">-</b><small>tokens in / out (cached)</small></div>
+    <div><b id="pf-tok">-</b><small>tokens this order (in / out)</small></div>
+    <div><b id="pf-k">-</b><small>tokens per 1,000 orders</small></div>
+    <div><b id="pf-share">-</b><small>agents that used a model</small></div>
     <div><b id="pf-a2a">-</b><small>A2A agent calls</small></div>
     <div><b id="pf-zero">-</b><small>steps with zero tokens</small></div>
     <div class="checks" id="pf-checks"></div>
-    <div class="cmp">Speed and token economics: one model call reads the order; everything else is deterministic code, MCP tools and A2A agents that cost no tokens. Our first 5-agent design took 31 to 140 s per order.</div>
+    <div class="cmp"><b style="display:inline;font:700 13px 'Barlow Condensed';color:#fff">Token economics:</b> only the Intake agent calls a model, once. Guardian, Fulfilment, the three carrier agents and the Judge are code, MCP tools and A2A services, so they use zero tokens and answer in milliseconds. Our first design used 5 LLM agents per order and took 31 to 140 s.</div>
   </div>
   <div class="chatbox" data-views="orders">
     <div class="chathead"><b>Order desk</b><span class="hint">Talk to Vegam like a customer would. It asks if anything is missing.</span></div>
@@ -625,7 +629,7 @@ const AG=[['orchestrator','Orchestrator','Plans the steps and routes work','Orch
  ['carriers','Carrier agents','Bid and negotiate for the job','A2A'],['judge','Judge agent','Checks every claim against real data','Sub-agent']];
 let lastTyped='',a2aCalls=0;
 function initAgents(){a2aCalls=0;['pf-t','pf-llm','pf-tok','pf-a2a','pf-zero'].forEach(i=>$(i).textContent='…');
-  $('agents').innerHTML=AG.map(([id,n,d,p])=>`<div class="ag waiting ${id==='carriers'?'wide':''}" id="ag-${id}"><h4><span>${n}</span><span><span class="proto ${p==='A2A'?'a2a':''}" id="agp-${id}">${p}</span> <span class="st" id="ags-${id}">WAITING</span></span></h4><p id="agd-${id}">${d}</p><div id="agx-${id}"></div></div>`).join('')}
+  $('agents').innerHTML=AG.map(([id,n,d,p])=>`<div class="ag waiting ${id==='carriers'?'wide':''}" id="ag-${id}"><h4><span>${n}</span><span><span class="proto ${p==='A2A'?'a2a':''}" id="agp-${id}">${p}</span> <span class="st" id="ags-${id}">WAITING</span></span></h4><span class="tk" id="agt-${id}">${id==='intake'?'tokens: pending':'0 tokens'}</span><p id="agd-${id}">${d}</p><div id="agx-${id}"></div></div>`).join('')}
 function setAgent(id,state,detail,proto,ms){const el=$('ag-'+id);if(!el)return;el.className='ag '+state+(id==='carriers'?' wide':'');$('ags-'+id).textContent=state.toUpperCase();
   if(detail)$('agd-'+id).textContent=detail+(ms?`  (${ms} ms)`:'');if(proto){$('agp-'+id).textContent=proto.startsWith('A2A')?'A2A':proto.split(' ')[0];$('agp-'+id).className='proto '+(proto.startsWith('A2A')?'a2a':'')}}
 function phHtml(t){return esc(t).replace(/\[(AADHAAR|PAN|CARD|UPI|EMAIL|PHONE|IFSC|ACCOUNT)[^\]]*\]/g,m=>`<span class="ph">${m}</span>`)}
@@ -641,7 +645,9 @@ function onAgent(e){
       (e.transcript?`<div class="tx">`+e.transcript.map(t=>`<div class="${t.from==='Orchestrator'?'o':''}"><b>${esc(t.from)}${t.to?' → '+esc(t.to):''}</b>${esc(t.text)}</div>`).join('')+`</div>`:'')}
   if(e.agent==='judge'){const c=e.claims||[];$('truth').className='';$('truth').innerHTML=`<div class="lbl">${esc(e.detail)}</div>`+(c.length?c.map(x=>`<div class="claim"><span>${esc(x.kind)}: <b>${esc(x.text)}</b></span><span class="${x.ok?'ok':'no'}">${x.ok?'✓ verified':'✗ not in data'}</span></div>`).join(''):'<div class="lbl">No factual claims in the reply.</div>')+(e.output_masked?`<div class="lbl">${e.output_masked} item(s) masked in the reply too</div>`:'')}
 }
-function onEnd(e){const pv=$('privacy').textContent,tr=$('truth').textContent;
+function onEnd(e){const tin=e.tokens?e.tokens.in:0,tout=e.tokens?e.tokens.out:0,tt=tin+tout;
+  const ti=$('agt-intake');if(ti){ti.textContent=tt?`${tt} tokens (${tin} in / ${tout} out${e.tokens&&e.tokens.cached?`, ${e.tokens.cached} cached`:''})`:'0 tokens';ti.className='tk'+(tt?' used':'')}
+  $('pf-k').textContent=`${tt}k`;  /* tokens per order x 1,000 orders */$('pf-share').textContent=`${e.llm_calls?1:0} of 6`;const pv=$('privacy').textContent,tr=$('truth').textContent;
   $('pf-checks').innerHTML=[`✓ Responsible AI: ${/masked/.test(pv)?pv.match(/(\d+) item/)?.[1]+' item(s) masked':'no personal data found'}`,`✓ Grounded: ${(tr.match(/\d+\/\d+/)||['checked'])[0]} claims verified`,
    `✓ A2A: ${a2aCalls} agent calls`,`✓ Latency: ${e.t.toFixed(1)} s`,`✓ Tokens: ${e.tokens?e.tokens.in+e.tokens.out:0} (${e.llm_calls??0} LLM call)`].map(x=>`<span>${x}</span>`).join('');$('pf-t').textContent=e.t.toFixed(1);$('pf-llm').textContent=e.llm_calls??'-';$('pf-tok').textContent=e.tokens?`${e.tokens.in} / ${e.tokens.out}`+(e.tokens.cached?` (${e.tokens.cached} cached)`:''):'-';$('pf-a2a').textContent=a2aCalls;$('pf-zero').textContent=e.zero_token_steps??'-';
   setAgent('orchestrator','done','All steps finished in '+e.t.toFixed(1)+' s')}

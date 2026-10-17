@@ -46,7 +46,7 @@ _RULES = [
      lambda m, t: verhoeff_ok("".join(c for c in m if c.isdigit())) or re.search(r"aadh?aa?r|uid", t[max(0, t.find(m) - 30):t.find(m)], re.I) is not None,
      lambda m: f"[AADHAAR ••••{_last(m)}]"),
     ("PAN", re.compile(r"\b[A-Za-z]{5}\d{4}[A-Za-z]\b"), lambda m, t: m[3].upper() in "PCHFATBLJG", lambda m: "[PAN]"),
-    ("IFSC", re.compile(r"\b[A-Za-z]{4}0[A-Za-z0-9]{6}\b"), None, lambda m: "[IFSC]"),
+    ("IFSC", re.compile(r"\b[A-Za-z]{4}0[A-Za-z0-9]{6}\b"), lambda m, t: not m.upper().startswith("TRK"), lambda m: "[IFSC]"),
     ("EMAIL", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"), None, lambda m: "[EMAIL]"),
     ("UPI", re.compile(r"\b[\w.\-]{2,}@[a-z][a-z0-9]{2,}\b"), None, lambda m: "[UPI]"),
     ("ACCOUNT", re.compile(r"(?i)(?:account|a/c|acc)(?:\s*(?:no|number|num|#))?\.?\s*[:\-]?\s*(\d{9,18})"), None, None),
