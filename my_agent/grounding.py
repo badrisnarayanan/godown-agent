@@ -24,7 +24,8 @@ def verify(text: str, evidence, user_text: str = ""):
             claims.append({"kind": kind, "text": m.group(0), "ok": m.group(0).lower() in ev})
     for m in re.finditer(r"(?<![\w.])\d[\d,]*(?:\.\d+)?", text or ""):
         n = m.group(0).replace(",", "").rstrip(".")
-        claims.append({"kind": "number", "text": m.group(0), "ok": n in ev_digits or n in user})
+        whole = re.compile(rf"(?<![\d.]){re.escape(n)}(?![\d])")  # whole numbers only: "3" must not match inside "13"
+        claims.append({"kind": "number", "text": m.group(0), "ok": bool(whole.search(ev_digits) or whole.search(user))})
     for m in PROMISE.finditer(text or ""):
         claims.append({"kind": "promise", "text": m.group(0), "ok": m.group(0).lower() in ev})
     flagged = [c["text"] for c in claims if not c["ok"]]

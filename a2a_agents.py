@@ -17,6 +17,7 @@ CARRIERS = ["FastFreight", "BlueDart-Mock", "EcoMove"]
 def _card(req: Request, path, name, desc, skill_id, skill_name, skill_desc):
     base = str(req.base_url).rstrip("/")
     return {"protocolVersion": "0.3.0", "name": name, "description": desc, "url": f"{base}{path}",
+            "provider": {"organization": "Vegam Logistics", "url": base},
             "preferredTransport": "JSONRPC", "version": "1.0.0", "capabilities": {"streaming": False},
             "defaultInputModes": ["application/json", "text/plain"], "defaultOutputModes": ["application/json"],
             "skills": [{"id": skill_id, "name": skill_name, "description": skill_desc, "tags": ["logistics"]}]}
@@ -27,10 +28,16 @@ def _reply(rid, data):
                                                      "parts": [{"kind": "data", "data": data}]}}
 
 
+def _rpc_error(rid, code, msg):
+    # JSON-RPC errors travel inside a normal HTTP 200 response
+    return JSONResponse({"jsonrpc": "2.0", "id": rid, "error": {"code": code, "message": msg}})
+
+
 async def _read(req: Request):
     try:
         body = await req.json()
-        assert body.get("method") == "message/send"
+        if body.get("method") != "message/send":
+            return body.get("id"), {"__method_not_found__": body.get("method")}
         parts = body["params"]["message"]["parts"]
         data = next((p.get("data") for p in parts if p.get("kind") == "data"), None)
         if data is None:
@@ -63,7 +70,9 @@ def guardian_card(req: Request):
 async def guardian_rpc(req: Request):
     rid, data = await _read(req)
     if data is None:
-        return JSONResponse({"jsonrpc": "2.0", "id": rid, "error": {"code": -32600, "message": "Invalid request"}}, status_code=400)
+        return _rpc_error(rid, -32600, "Invalid request")
+    if "__method_not_found__" in data:
+        return _rpc_error(rid, -32601, f"Method not found: {data['__method_not_found__']}")
     return _reply(rid, guardian_skill(data))
 
 
@@ -80,7 +89,9 @@ def carrier_card(name: str, req: Request):
 async def carrier_rpc(name: str, req: Request):
     rid, data = await _read(req)
     if data is None or name not in CARRIERS:
-        return JSONResponse({"jsonrpc": "2.0", "id": rid, "error": {"code": -32600, "message": "Invalid request"}}, status_code=400)
+        return _rpc_error(rid, -32600, "Invalid request")
+    if "__method_not_found__" in data:
+        return _rpc_error(rid, -32601, f"Method not found: {data['__method_not_found__']}")
     return _reply(rid, carrier_skill(name, data))
 
 
