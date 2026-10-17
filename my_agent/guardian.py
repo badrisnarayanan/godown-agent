@@ -41,11 +41,13 @@ def _last(s, n=4):
 
 # (type, regex, validator or None, label builder). Most specific first so a card is not mistaken for a phone number.
 _RULES = [
-    ("CARD", re.compile(r"(?<!\d)(?:\d[ -]?){13,19}(?!\d)"), lambda m, t: luhn_ok(m), lambda m: f"[CARD ••••{_last(m)}]"),
-    ("AADHAAR", re.compile(r"(?<!\d)[2-9]\d{3}[ -]?\d{4}[ -]?\d{4}(?!\d)"),
+    ("CARD", re.compile(r"(?<!\d)(?:\d[ .\-/]?){13,19}(?!\d)"), lambda m, t: luhn_ok(m), lambda m: f"[CARD ••••{_last(m)}]"),
+    ("AADHAAR", re.compile(r"(?<!\d)[2-9]\d{3}[ .\-/]?\d{4}[ .\-/]?\d{4}(?!\d)"),
      lambda m, t: verhoeff_ok("".join(c for c in m if c.isdigit())) or re.search(r"aadh?aa?r|uid", t[max(0, t.find(m) - 30):t.find(m)], re.I) is not None,
      lambda m: f"[AADHAAR ••••{_last(m)}]"),
-    ("PAN", re.compile(r"\b[A-Za-z]{5}\d{4}[A-Za-z]\b"), lambda m, t: m[3].upper() in "PCHFATBLJG", lambda m: "[PAN]"),
+    ("PAN", re.compile(r"\b[A-Za-z]{5}\d{4}[A-Za-z]\b"), None, lambda m: "[PAN]"),
+    ("VOTER_ID", re.compile(r"\b[A-Za-z]{3}\d{7}\b"), None, lambda m: "[VOTER ID]"),
+    ("PASSPORT", re.compile(r"\b[A-Za-z]\d{7}\b"), None, lambda m: "[PASSPORT]"),
     ("IFSC", re.compile(r"\b[A-Za-z]{4}0[A-Za-z0-9]{6}\b"), lambda m, t: not m.upper().startswith("TRK"), lambda m: "[IFSC]"),
     ("EMAIL", re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.-]+\b"), None, lambda m: "[EMAIL]"),
     ("UPI", re.compile(r"\b[\w.\-]{2,}@[a-z][a-z0-9]{2,}\b"), None, lambda m: "[UPI]"),
@@ -73,6 +75,6 @@ def mask(text: str):
                 return raw
             out = label(raw)
             findings.append({"type": kind, "preview": out})
-            return out + (" " if raw.endswith((" ", "-")) else "")
+            return out + (" " if raw.endswith((" ", "-", ".", "/")) else "")
         text = rx.sub(repl, text)
     return {"masked": text, "findings": findings}
