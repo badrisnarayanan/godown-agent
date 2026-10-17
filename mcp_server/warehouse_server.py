@@ -434,13 +434,59 @@ def get_route(godown: str, destination: str) -> dict:
             "from": [g[1], g[2]], "to": list(dest)}
 
 
-@mcp.tool()
-def get_carrier_quote(carrier: str, distance_km: float, weight_kg: float) -> dict:
-    """Quote a carrier. Carriers: FastFreight, BlueDart-Mock, EcoMove. FastFreight is flaky on the first call (planted failure)."""
+# Each carrier agent's profile: what it can carry and how it usually performs.
+CARRIER_PROFILE = {  # each carrier agent runs its own business: roster, capacity, and the margin it wants
+    "FastFreight":   {"max_kg": 15, "max_km": 3000, "capacity_per_day": 40, "base_on_time": 0.90,
+                      "drivers": 12, "target_margin": 0.30, "min_margin": 0.12},
+    "BlueDart-Mock": {"max_kg": 60, "max_km": 3000, "capacity_per_day": 25, "base_on_time": 0.96,
+                      "drivers": 8, "target_margin": 0.40, "min_margin": 0.20},
+    "EcoMove":       {"max_kg": 80, "max_km": 600,  "capacity_per_day": 60, "base_on_time": 0.85,
+                      "drivers": 20, "target_margin": 0.18, "min_margin": 0.06},
+}
+
+
+def _carrier_state(name):
+    """Live state: shipments booked in the last 24 h (load) and reliability learned from recent call outcomes."""
+    c = db()
+    c.execute("CREATE TABLE IF NOT EXISTS carrier_events(carrier TEXT, ok INT, ts REAL)")
+    since = time.time() - 86400
+    load = sum(1 for (d,) in c.execute("SELECT data FROM shipments WHERE created > ?", (since,))
+               if json.loads(d).get("carrier") == name)
+    ev = c.execute("SELECT ok FROM carrier_events WHERE carrier=? ORDER BY ts DESC LIMIT 20", (name,)).fetchall()
+    c.close()
+    prof = CARRIER_PROFILE[name]
+    ok = sum(r["ok"] for r in ev)
+    # blend the published on-time rate with what we have observed ourselves (more weight as evidence grows)
+    w = min(len(ev), 20) / 20
+    reliability = round((1 - w) * prof["base_on_time"] + w * (ok / len(ev) if ev else prof["base_on_time"]), 3)
+    return {"load_today": load, "capacity_per_day": prof["capacity_per_day"],
+            "drivers_free": max(0, prof["drivers"] - load // 3), "target_margin_pct": round(prof["target_margin"] * 100),
+            "min_margin_pct": round(prof["min_margin"] * 100),
+            "load_pct": round(100 * load / prof["capacity_per_day"]), "reliability": reliability,
+            "recent_failures": len(ev) - ok}
+
+
+def _log_carrier(name, ok):
+    c = db()
+    c.execute("CREATE TABLE IF NOT EXISTS carrier_events(carrier TEXT, ok INT, ts REAL)")
+    c.execute("INSERT INTO carrier_events VALUES(?,?,?)", (name, 1 if ok else 0, time.time()))
+    c.commit()
+    c.close()
+
+
+def quote_carrier(carrier: str, distance_km: float, weight_kg: float, flaky: bool = True) -> dict:
+    """The carrier agent's decision: decline if outside its limits or full, otherwise quote with its live metrics."""
     if carrier not in CARRIERS:
         return {"error": f"unknown carrier {carrier}", "carriers": list(CARRIERS)}
-    if carrier == "FastFreight" and os.environ.get("FLAKY_CARRIER", "1") == "1":
-        with _FAIL_LOCK:  # hedged requests call this concurrently
+    prof, state = CARRIER_PROFILE[carrier], _carrier_state(carrier)
+    if weight_kg > prof["max_kg"]:
+        return {"carrier": carrier, "declined": f"parcel {weight_kg} kg is over our {prof['max_kg']} kg limit", "metrics": state}
+    if distance_km > prof["max_km"]:
+        return {"carrier": carrier, "declined": f"{distance_km} km is outside our {prof['max_km']} km service area", "metrics": state}
+    if state["load_today"] >= prof["capacity_per_day"]:
+        return {"carrier": carrier, "declined": "fully booked today", "metrics": state}
+    if carrier == "FastFreight" and flaky:
+        with _FAIL_LOCK:  # planted outage for the demo; hedged requests call this concurrently
             try:
                 st = json.loads(FAIL_STATE.read_text()) if FAIL_STATE.exists() else {"n": 0}
             except Exception:
@@ -448,11 +494,45 @@ def get_carrier_quote(carrier: str, distance_km: float, weight_kg: float) -> dic
             st["n"] += 1
             FAIL_STATE.write_text(json.dumps(st))
         if st["n"] % 3 == 1:
+            _log_carrier(carrier, False)
             return {"error": "503 Service Unavailable from FastFreight API",
-                    "hint": "retry once, or fall back to another carrier"}
+                    "hint": "retry once, or fall back to another carrier", "metrics": state}
+    _log_carrier(carrier, True)
+    st = _carrier_state(carrier)
+    cost, eta = _carrier_cost_eta(carrier, distance_km, weight_kg, st)
+    surge = 1 + 0.25 * max(0, st["load_pct"] - 60) / 40 + (0.15 if st["drivers_free"] <= 2 else 0)  # busy or short-staffed: bid higher
+    bid = round(cost * (1 + prof["target_margin"]) * surge, 2)
+    return {"carrier": carrier, "price": bid, "eta_hours": eta, "metrics": st,
+            "note": f"bid at {round(prof['target_margin'] * 100)}% margin" + (", surge pricing (busy)" if surge > 1 else "")}
+
+
+def _carrier_cost_eta(carrier, distance_km, weight_kg, st):
     base, pkg, pkm, speed = CARRIERS[carrier]
-    return {"carrier": carrier, "price": round(base + pkg * weight_kg + pkm * distance_km, 2),
-            "eta_hours": round(distance_km / speed + 6, 1)}
+    eta = (distance_km / speed + 6) * (1 + 0.5 * max(0, st["load_pct"] - 70) / 30)  # a busy carrier is slower
+    return round((base + pkg * weight_kg + pkm * distance_km) * 0.75, 2), round(eta, 1)  # cost = 75% of list price
+
+
+def carrier_counter(carrier: str, distance_km: float, weight_kg: float, offer: float) -> dict:
+    """Negotiation: accept an offer above our minimum margin, counter at our floor if close, otherwise reject."""
+    if carrier not in CARRIERS:
+        return {"error": f"unknown carrier {carrier}"}
+    prof, st = CARRIER_PROFILE[carrier], _carrier_state(carrier)
+    cost, eta = _carrier_cost_eta(carrier, distance_km, weight_kg, st)
+    floor = round(cost * (1 + prof["min_margin"]), 2)
+    if offer >= floor:
+        return {"carrier": carrier, "decision": "accept", "price": round(offer, 2), "eta_hours": eta, "metrics": st,
+                "message": f"Accepted Rs {round(offer)}: still above our {round(prof['min_margin'] * 100)}% minimum margin."}
+    if offer >= floor * 0.92:
+        return {"carrier": carrier, "decision": "counter", "price": floor, "eta_hours": eta, "metrics": st,
+                "message": f"Can't do Rs {round(offer)}. Best we can do is Rs {round(floor)}, our floor."}
+    return {"carrier": carrier, "decision": "reject", "metrics": st,
+            "message": f"Rs {round(offer)} is below our cost plus minimum margin. We pass."}
+
+
+@mcp.tool()
+def get_carrier_quote(carrier: str, distance_km: float, weight_kg: float) -> dict:
+    """Quote a carrier. Carriers: FastFreight, BlueDart-Mock, EcoMove. Each may decline (limits, capacity) or fail (outage)."""
+    return quote_carrier(carrier, distance_km, weight_kg, os.environ.get("FLAKY_CARRIER", "1") == "1")
 
 
 @mcp.tool()

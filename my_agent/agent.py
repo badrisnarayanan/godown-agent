@@ -13,6 +13,7 @@ from google.adk.events import Event, EventActions
 from google.genai import types
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+from .a2a_client import a2a_base, a2a_send
 
 MODEL = "gemini-flash-latest"
 FAST = types.GenerateContentConfig(thinking_config=types.ThinkingConfig(thinking_budget=0), temperature=0)
@@ -363,23 +364,46 @@ class FulfilmentEngine(BaseAgent):
                              geo={"from": route.get("from"), "to": route.get("to"), "godown": primary, "poly": route.get("polyline")},
                              box=box, route={k: route.get(k) for k in ("distance_km", "drive_hours", "source")})
 
-            # 3. CARRIERS in parallel; heal by retry, then exclude ----------------------
+            # 3. CARRIER AGENTS over A2A, in parallel; each decides with its own live metrics ------------
+            flaky = str(state.get("FLAKY_CARRIER", "1")) == "1"
+            tele = {c: {"name": c, "transport": "A2A", "attempts": 0, "ms": 0} for c in CARRIERS}
+            yield self._prog("agent", "Asking 3 carrier agents for quotes in parallel over A2A", "agent", agent="carriers",
+                             state="working", protocol="A2A", children=[{"name": c, "state": "working"} for c in CARRIERS])
+
+            async def ask(c):
+                """One A2A call to a carrier agent; falls back to the MCP tool if the A2A service is unreachable."""
+                tele[c]["attempts"] += 1
+                payload = {"distance_km": route["distance_km"], "weight_kg": box["total_weight_kg"], "flaky": flaky}
+                try:
+                    q, ms = await asyncio.to_thread(a2a_send, f"{a2a_base()}/a2a/carrier/{c}", payload)
+                    tele[c]["ms"] += ms
+                    return q
+                except Exception:
+                    tele[c]["transport"] = "MCP (A2A unreachable, self-healed)"
+                    return await call("get_carrier_quote", carrier=c, distance_km=route["distance_km"],
+                                      weight_kg=box["total_weight_kg"])
+
             async def quote(c):
                 if c in hot:  # learned: this carrier flakes, so hedge with two parallel requests
-                    rs = await asyncio.gather(*[call("get_carrier_quote", carrier=c, distance_km=route["distance_km"],
-                                                     weight_kg=box["total_weight_kg"]) for _ in range(2)])
-                    good = [q for q in rs if "error" not in q]
+                    rs = await asyncio.gather(ask(c), ask(c))
+                    good = [q for q in rs if "error" not in q and "declined" not in q]
                     if good:
                         learned.append(f"{c} flaked before -> hedged request, no retry round-trip")
+                        tele[c]["metrics"] = good[0].get("metrics")
                         return good[0]
                 for attempt in range(3):
-                    q = await call("get_carrier_quote", carrier=c, distance_km=route["distance_km"],
-                                   weight_kg=box["total_weight_kg"])
+                    q = await ask(c)
+                    tele[c]["metrics"] = q.get("metrics")
+                    if "declined" in q:
+                        tele[c]["declined"] = q["declined"]
+                        return None
                     if "error" not in q:
                         if attempt:
                             await lesson("dispatch", f"{c} returned 503", f"retry #{attempt} succeeded")
+                            tele[c]["recovered"] = True
                         return q
                 await lesson("dispatch", f"{c} unavailable after 3 tries", "excluded from selection")
+                tele[c]["failed"] = True
 
             quotes = [q for q in await asyncio.gather(*[quote(c) for c in CARRIERS]) if q]
             if not quotes:
@@ -389,11 +413,72 @@ class FulfilmentEngine(BaseAgent):
                 yield self._done(res | {"reason": "all carriers down", "llm_calls": llm_calls},
                                  f"AUDIT FAILED: all carriers down. Healer: {d.get('reason')}")
                 return
-            best = min(quotes, key=lambda q: (q["eta_hours"], q["price"]))  # speed first
+
+            # contextual decision: speed first, then price, reliability and how busy each carrier is
+            def norm(v, vals):
+                lo, hi = min(vals), max(vals)
+                return 0.0 if hi == lo else (v - lo) / (hi - lo)
+
+            def score_all():
+                etas, prices = [q["eta_hours"] for q in quotes], [q["price"] for q in quotes]
+                for q in quotes:
+                    m = q.get("metrics") or {}
+                    q["score"] = round(0.45 * norm(q["eta_hours"], etas) + 0.25 * norm(q["price"], prices)
+                                       + 0.20 * (1 - m.get("reliability", 0.9)) * 5 + 0.10 * m.get("load_pct", 0) / 100, 3)
+
+            # NEGOTIATION ROUND: counter-offer the two best bidders at 85% of their bid, over A2A
+            score_all()
+            transcript = [{"from": "Orchestrator", "to": "all carriers",
+                           "text": f"Shipment {route['distance_km']} km, {box['total_weight_kg']} kg. Send your bids."}]
+            for c in CARRIERS:
+                q = next((x for x in quotes if x["carrier"] == c), None)
+                if q:
+                    transcript.append({"from": c, "text": f"Bid Rs {round(q['price'])}, {q['eta_hours']} h ({q.get('note', '')})"})
+                elif tele[c].get("declined"):
+                    transcript.append({"from": c, "text": f"Declined: {tele[c]['declined']}"})
+                elif tele[c].get("failed"):
+                    transcript.append({"from": c, "text": "No answer (service down)"})
+
+            async def negotiate(q):
+                offer = round(q["price"] * 0.85)
+                try:
+                    r, _ = await asyncio.to_thread(a2a_send, f"{a2a_base()}/a2a/carrier/{q['carrier']}",
+                                                   {"action": "counter", "offer": offer, "distance_km": route["distance_km"],
+                                                    "weight_kg": box["total_weight_kg"]})
+                except Exception:
+                    return q["carrier"], offer, None
+                return q["carrier"], offer, r
+
+            top2 = sorted(quotes, key=lambda q: q["score"])[:2]
+            for c, offer, r in await asyncio.gather(*[negotiate(q) for q in top2]):
+                transcript.append({"from": "Orchestrator", "to": c, "text": f"Can you do Rs {offer}?"})
+                if r is None:
+                    transcript.append({"from": c, "text": "(negotiation channel unavailable, original bid stands)"})
+                    continue
+                transcript.append({"from": c, "text": r.get("message", r.get("decision", ""))})
+                q = next(x for x in quotes if x["carrier"] == c)
+                if r.get("decision") in ("accept", "counter"):
+                    q["bid"], q["price"] = q["price"], r["price"]
+                    q["negotiated"] = r["decision"]
+            score_all()
+            best = min(quotes, key=lambda q: q["score"])
+            saved = round(best.get("bid", best["price"]) - best["price"])
+            transcript.append({"from": "Orchestrator", "to": best["carrier"],
+                               "text": f"Awarded at Rs {round(best['price'])}" + (f" (saved Rs {saved} vs bid)." if saved > 0 else ".")})
+            bm = best.get("metrics") or {}
+            why = (f"{best['carrier']} wins: {best['eta_hours']} h, Rs {best['price']}, "
+                   f"{round(100 * bm.get('reliability', 0.9))}% reliable, {bm.get('load_pct', 0)}% booked")
+            children = []
+            for c in CARRIERS:
+                t, q = tele[c], next((x for x in quotes if x["carrier"] == c), None)
+                children.append({**t, "state": "won" if q is best else ("declined" if t.get("declined") else
+                                 ("failed" if t.get("failed") else "quoted")),
+                                 "price": q and q["price"], "bid": q and q.get("bid"), "negotiated": q and q.get("negotiated"),
+                                 "eta_hours": q and q["eta_hours"], "score": q and q["score"]})
+            yield self._prog("agent", why, "agent", agent="carriers", state="done", protocol="A2A", children=children,
+                             transcript=transcript)
             trace.append(f"carrier {best['carrier']} {best['eta_hours']}h from {len(quotes)} quotes ({time.time() - t0:.1f}s)")
-            yield self._prog("carrier", f"{best['carrier']} chosen: {best['eta_hours']}h, Rs {best['price']} (from {len(quotes)} quotes: "
-                             + ", ".join(f"{q['carrier']} {q['eta_hours']}h" for q in quotes) + ")",
-                             quotes=quotes, chosen=best["carrier"])
+            yield self._prog("carrier", why, quotes=quotes, chosen=best["carrier"])
             for ev in flush():
                 yield ev
 
@@ -412,7 +497,8 @@ class FulfilmentEngine(BaseAgent):
         heal_txt = ("Self-healed: " + "; ".join(healed) if healed else "Clean run") + \
             ("\nApplied lessons: " + "; ".join(learned) if learned else "")
         out = res | {"status": "OK" if need == 0 else "PARTIAL", "godown": primary, "sku": sku, "shipped": shipped,
-                     "learned": learned, "carrier": best["carrier"], "tracking_id": ship.get("tracking_id"), "llm_calls": llm_calls,
+                     "learned": learned, "order_id": order["order_id"], "customer": order["customer"], "eta_hours": best["eta_hours"],
+                     "price": best["price"], "carrier": best["carrier"], "tracking_id": ship.get("tracking_id"), "llm_calls": llm_calls,
                      "engine_s": round(time.time() - t0, 2), "destination": dest}
         yield self._done(out, f"AUDIT {status} - engine {time.time() - t0:.1f}s (LLM calls: {llm_calls})\n"
                          + "\n".join("  - " + t for t in trace)

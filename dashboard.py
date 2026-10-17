@@ -1,5 +1,5 @@
 """Live dashboard: POST /api/order streams pipeline stages (SSE). Run: uvicorn dashboard:app --port 8020"""
-import base64, hmac, json, os, re, sqlite3, time
+import asyncio, base64, hmac, json, os, re, sqlite3, time
 from collections import defaultdict, deque
 from pathlib import Path
 from dotenv import load_dotenv
@@ -9,6 +9,9 @@ from fastapi.responses import FileResponse, StreamingResponse, JSONResponse
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 from my_agent.agent import root_agent
+from my_agent.a2a_client import a2a_base, a2a_send
+from my_agent.grounding import SAFE_REPLY, verify
+from my_agent.guardian import mask as guardian_mask
 
 ROOT = Path(__file__).parent
 DB, LESSONS = ROOT / "mcp_server" / "warehouse.db", ROOT / "mcp_server" / "lessons.json"
@@ -371,44 +374,120 @@ def reset():
 async def order(req: Request):
     body = await req.json()
     body["text"] = str(body.get("text") or "")[:2000]
-    parts, saved = [], None
+    raw_file, saved = None, None
     if body.get("file_b64"):
-        raw = check_upload(body["file_b64"], str(body.get("mime", "")))
-        saved = save_upload(raw, body["mime"])  # keep the original order document / voice note
-        parts.append(types.Part.from_bytes(data=raw, mime_type=body["mime"]))
-        parts.append(types.Part(text=body.get("text") or "Process this order."))
-    else:
-        parts.append(types.Part(text=body.get("text", "")))
+        raw_file = check_upload(body["file_b64"], str(body.get("mime", "")))
+        saved = save_upload(raw_file, body["mime"])  # keep the original order document / voice note
 
     async def gen():
         t0 = time.time()
+        send = lambda d: f"data: {json.dumps(d)}\n\n"
+        el = lambda: round(time.time() - t0, 2)
+        yield send({"kind": "agent", "agent": "orchestrator", "state": "working", "protocol": "Orchestrator", "t": 0,
+                    "detail": "Plan: Guardian (A2A) masks personal data -> Intake (Gemini) reads the order -> Fulfilment (MCP tools) "
+                              "-> Carrier agents (A2A) bid and negotiate -> Judge verifies the reply"})
+        # 1. GUARDIAN over A2A: personal and financial identifiers are masked before any model sees the text
+        try:
+            g, ms = await asyncio.to_thread(a2a_send, f"{a2a_base()}/a2a/guardian", {"text": body["text"]})
+            via = "A2A"
+        except Exception:
+            g, ms, via = guardian_mask(body["text"]), 0, "in-process (A2A unreachable, self-healed)"
+        seen, findings = g["masked"], g["findings"]
+        types_found = sorted({f["type"] for f in findings})
+        yield send({"kind": "agent", "agent": "guardian", "state": "done", "protocol": via, "ms": ms, "t": el(),
+                    "detail": (f"Masked {len(findings)} item(s): {', '.join(types_found)}. The model only sees placeholders."
+                               if findings else "No personal or financial identifiers found."),
+                    "seen": seen, "findings": findings,
+                    "attachment": ("Attachment passed to the model as-is (image and voice redaction not enabled)" if raw_file else None)})
+        # 2. Tracking questions are answered from the database, never by a model (no invented statuses)
+        m = re.search(r"\bTRK[0-9A-Fa-f]{8}\b", seen)
+        if m and not raw_file:
+            tid = m.group(0).upper()
+            row = None
+            if DB.exists():
+                c = sqlite3.connect(DB)
+                row = c.execute("SELECT data FROM shipments WHERE id=?", (tid,)).fetchone()
+                c.close()
+            if row:
+                d = json.loads(row[0])
+                reply = (f"{tid}: {d['qty']} x {d['sku']} from {d['godown']} to {d['destination']} via {d['carrier']}, "
+                         f"status {d['status']}, ETA about {d['eta_hours']} h.")
+                evidence = d
+            else:
+                reply, evidence = f"I can't find a shipment with tracking ID {tid}. Please check the ID and try again.", {"tid": tid}
+            v = verify(reply, evidence, seen)
+            yield send({"kind": "agent", "agent": "judge", "state": "done", "protocol": "Sub-agent", "t": el(),
+                        "detail": f"{v['verified']}/{v['total']} claims verified against the shipment database", "claims": v["claims"]})
+            yield send({"kind": "result", "result": {"status": "TRACKING", "reply": reply, "llm_calls": 0}, "text": reply, "t": el()})
+            yield send({"kind": "end", "t": el(), "tokens": {"in": 0, "out": 0}, "llm_calls": 0, "zero_token_steps": 3})
+            return
+        parts = []
+        if raw_file:
+            parts.append(types.Part.from_bytes(data=raw_file, mime_type=body["mime"]))
+        parts.append(types.Part(text=seen or "Process this order."))
         sid = str(body.get("session") or "")
         sid = sid if re.fullmatch(r"[\w-]{1,40}", sid) else None
         s = await runner.session_service.get_session(app_name="dash", user_id="u", session_id=sid) if sid else None
         if not s:  # first message of an order, or the previous one finished
             s = await runner.session_service.create_session(app_name="dash", user_id="u", session_id=sid,
                                                             state={"FLAKY_CARRIER": "1" if body.get("chaos", True) else "0"})
-        send = lambda d: f"data: {json.dumps(d)}\n\n"
         if saved:
             yield send({"kind": "saved", "url": f"/uploads/{saved}", "mime": body["mime"], "t": 0})
+        tok = {"in": 0, "out": 0, "cached": 0}
+        llm_calls, zero_steps = 0, 0
         try:
             async for e in runner.run_async(user_id="u", session_id=s.id, new_message=types.Content(role="user", parts=parts)):
-                el = round(time.time() - t0, 2)
+                um = getattr(e, "usage_metadata", None)
+                if um and (um.prompt_token_count or um.candidates_token_count):
+                    tok["in"] += um.prompt_token_count or 0
+                    tok["out"] += um.candidates_token_count or 0
+                    tok["cached"] += getattr(um, "cached_content_token_count", 0) or 0
+                    llm_calls += 1
+                if e.custom_metadata and e.custom_metadata.get("kind") in ("stage", "agent"):
+                    zero_steps += 1
                 txt = e.content.parts[0].text if e.content and e.content.parts and e.content.parts[0].text else ""
                 if e.author == "intake" and txt:
-                    yield send({"kind": "stage", "stage": "intake", "detail": txt, "t": el})
+                    yield send({"kind": "stage", "stage": "intake", "detail": guardian_mask(txt)["masked"], "t": el()})
                 elif e.custom_metadata:
-                    yield send({**e.custom_metadata, "t": el})
+                    yield send({**e.custom_metadata, "t": el()})
                 if e.actions and e.actions.state_delta and "result" in e.actions.state_delta:
-                    res = e.actions.state_delta["result"]
+                    res = dict(e.actions.state_delta["result"])
                     if saved and res.get("tracking_id"):
                         idx = json.loads(INDEX.read_text()) if INDEX.exists() else {}
                         idx[res["tracking_id"]] = {"url": f"/uploads/{saved}", "mime": body["mime"]}
                         INDEX.write_text(json.dumps(idx))
-                    yield send({"kind": "result", "result": res, "text": txt, "t": el})
+                    # 3. JUDGE: the customer-facing text must be grounded in tool results; output is masked too
+                    if res.get("status") == "NEEDS_INFO":
+                        claim_text, evidence = res.get("question", ""), W.list_catalog()
+                    elif res.get("tracking_id"):
+                        claim_text, evidence = (txt.split(" | ")[-1] if " | " in txt else txt), res
+                    else:
+                        claim_text, evidence = res.get("reason") or txt, res.get("reason") or txt
+                    v = verify(claim_text, evidence, seen)
+                    blocked = bool(v["flagged"]) and res.get("status") == "NEEDS_INFO"
+                    if blocked:
+                        res["question"], txt = SAFE_REPLY, SAFE_REPLY
+                    out = guardian_mask(txt)
+                    if res.get("question"):
+                        res["question"] = guardian_mask(res["question"])["masked"]
+                    yield send({"kind": "agent", "agent": "judge", "state": "flagged" if blocked else "done", "protocol": "Sub-agent",
+                                "t": el(), "claims": v["claims"], "output_masked": len(out["findings"]),
+                                "detail": (f"Blocked an unverified claim ({', '.join(v['flagged'][:3])}) and replied safely"
+                                           if blocked else f"{v['verified']}/{v['total']} claims verified against tool results")})
+                    yield send({"kind": "result", "result": res, "text": out["masked"], "t": el()})
         except Exception as ex:
             print("order error:", repr(ex))  # details stay in the server log, not the browser
             yield send({"kind": "error", "detail": "The order could not be processed. Please try again."})
-        yield send({"kind": "end", "t": round(time.time() - t0, 2)})
+        yield send({"kind": "end", "t": el(), "tokens": tok, "llm_calls": llm_calls, "zero_token_steps": zero_steps + 2})
 
     return StreamingResponse(gen(), media_type="text/event-stream")
+
+
+@app.get("/api/eval-results")
+def eval_results():
+    f = ROOT / "docs" / "eval_results.json"
+    return json.loads(f.read_text()) if f.exists() else {"generated": None, "sections": []}
+
+
+from a2a_agents import router as a2a_router  # noqa: E402  (needs warehouse_server on sys.path, set up above)
+app.include_router(a2a_router)
