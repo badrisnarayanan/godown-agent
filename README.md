@@ -1,32 +1,29 @@
-# godown-agent: autonomous logistics fulfilment (Agent Wars)
+# Vegam Logistics: autonomous order-to-doorstep agents
 
-Photo / voice / text order in, dispatched shipment with tracking ID out, with no human in the loop.
+Send an order as a **photo, voice note or text**. Vegam finds the stock, packs it, routes it, books the fastest carrier, dispatches it and texts the customer a tracking link, with nobody in between. If details are missing, it asks.
 
-## Architecture: agents only where reasoning is needed
-```
-image | voice | text ─► [Intake agent: Gemini multimodal]  (1 LLM call)
-                              │ structured order
-                              ▼
-                 [Fulfilment engine: deterministic, talks to our MCP server]
-        godown ─► ( packaging ‖ routing ) ─► carrier quotes ‖ ─► dispatch ─► audit
-                              │ unrecoverable failure only
-                              ▼
-        [Exception healer agent: Jev (TypeSafe System One), Gemini fallback]
-```
-- **MCP**: `mcp_server/warehouse_server.py` exposes stock, reservations, boxes, routing, carriers, shipments and lessons as MCP tools (SQLite).
-- **Multimodal**: purchase-order photos and voice notes handled by Gemini in the intake step.
-- **APIs**: Google Maps geocoding (`USE_REAL_MAPS=1` + `GOOGLE_MAPS_API_KEY`, offline fallback otherwise), carrier quote APIs, Jev decisions API.
-- **Self-healing**: flaky carrier retry then exclusion, out-of-stock godown rerouting, split orders, bad-address repair, backorder decisions.
-- **Learning loop**: every fix is saved to `lessons.json`; later runs read it and apply it (learned address aliases skip the healer call; carriers that flaked get hedged requests). `eval_suite.py` has a case proving run 2 is cheaper than run 1.
-- **Speed**: 1 LLM call on the happy path; parallel packaging/routing and carrier quotes. ~3s end to end.
-
-## Run
+## Run it
 ```
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-cp my_agent/.env.example my_agent/.env   # add GOOGLE_API_KEY (+ JEV_API_KEY optional)
-uvicorn dashboard:app --port 8020        # live dashboard: stages, healing log, stock, lessons memory
-.venv/bin/adk web .                      # raw ADK dev UI
-.venv/bin/python run_pipeline.py samples/order1.png
-.venv/bin/python eval_suite.py           # 10 cases: happy path, reroute, split, shortfall, bad address, voice, image...
+cp my_agent/.env.example my_agent/.env     # GOOGLE_API_KEY (+ JEV_API_KEY, GOOGLE_MAPS_API_KEY, USE_REAL_MAPS=1)
+.venv/bin/uvicorn dashboard:app --port 8020   # open http://localhost:8020
+.venv/bin/python eval_suite.py                # 11 behaviour evals
 ```
-Deploy: `./deploy.sh <gcp-project-id>`
+Deploy: `./deploy.sh <gcp-project-id>` (set `ADMIN_TOKEN` first on any public URL).
+
+## Two agents, used only where reasoning is needed
+- **Order agent**: one LLM call (Gemini, multimodal) reads the order; a deterministic engine does the rest over our **MCP warehouse server** (stock, reserve, box, route, carriers, shipment). Packaging and routing, and the three carrier quotes, run in parallel. About 3 s end to end.
+- **Inventory agent**: an LLM with MCP tools to add, restock, edit, write off and remove products from plain text or a receipt photo.
+- **Exception healer**: **Jev (TypeSafe System One)** makes fast typed decisions when code-level recovery runs out, with a Gemini fallback.
+
+## Failure handling and learning
+Flaky carrier (retry, then exclude), empty nearest godown (reroute), order bigger than one godown (split), unknown address (Google geocoding, coordinates, then healer), shortfall (backorder), incomplete order (asks a question, continues the same conversation). Every fix is saved to `lessons.json` and **read back on later runs**: learned addresses skip the healer, carriers that flaked get hedged requests. `eval_suite.py` includes a case proving run 2 is cheaper than run 1.
+
+## Dashboard
+Orders (live step banner, map, pipeline with MCP tool names), Track (timeline and moving truck), Inventory (assistant plus manual forms), Business (revenue, costs, profit). Uploaded photos and voice notes are saved and linked to the shipment. Google Maps is used for geocoding (full addresses or `lat,lng`), Routes API distance and time, and a Static Maps image.
+
+## Security design
+The LLM may propose, code and people decide: tool arguments are validated (positive bounded quantities, SKU format, markup stripped); the intake model has no tools and its JSON is re-validated; the inventory agent can only **queue** destructive actions, which need a human click; write endpoints need `ADMIN_TOKEN`; rate limits, upload size/type/magic-byte checks, security headers, and a validated map proxy protect cost and data. `security_suite.py` attacks a running server; its first admin and validation checks pass, but the full run is not yet complete (see Status).
+
+## Status
+Tested: evals (11/11), end-to-end text, photo and voice orders, tracking, finance, inventory agent in the UI, real Google geocoding and Routes. Not yet tested end to end: the complete adversarial suite, the follow-up-question flow through the UI, mic recording, and the Cloud Run build of the latest code.

@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import re
 import sqlite3
 import time
 import urllib.parse
@@ -17,6 +18,20 @@ LESSONS = Path(os.environ.get("LESSONS_FILE", ROOT / "lessons.json"))
 FAIL_STATE = Path(DB + ".fail")  # planted-failure bookkeeping (per-DB so evals are isolated)
 
 mcp = MCPServer("warehouse")
+
+# ---- input validation: tools are callable by LLMs, so never trust their arguments ----
+SKU_RE = re.compile(r"^[A-Z0-9][A-Z0-9-]{1,23}$")
+MAX_QTY = 10_000
+
+
+def _bad_qty(qty):
+    return not isinstance(qty, int) or isinstance(qty, bool) or qty < 1 or qty > MAX_QTY
+
+
+def _clean(text, n):
+    """Strip control chars and angle brackets, cap length."""
+    return re.sub(r"[\x00-\x1f<>]", "", str(text)).strip()[:n]
+
 
 GODOWNS = {
     "GD-CHN": ("Chennai Central Godown", 13.0827, 80.2707),
@@ -59,6 +74,7 @@ def _init():
     c = db()
     c.execute("CREATE TABLE IF NOT EXISTS stock(godown TEXT, sku TEXT, qty INT, PRIMARY KEY(godown, sku))")
     c.execute("CREATE TABLE IF NOT EXISTS shipments(id TEXT PRIMARY KEY, data TEXT, created REAL)")
+    c.execute("CREATE TABLE IF NOT EXISTS pending(id TEXT PRIMARY KEY, action TEXT, args TEXT, summary TEXT, created REAL, status TEXT)")
     c.execute("CREATE TABLE IF NOT EXISTS catalog(sku TEXT PRIMARY KEY, name TEXT, weight REAL, volume REAL, price REAL, cost REAL)")
     if not c.execute("SELECT 1 FROM catalog LIMIT 1").fetchone():
         for k, (n, w, v) in SKUS.items():
@@ -72,6 +88,47 @@ def _init():
 
 
 _init()
+
+
+BIG_REMOVAL = 25  # removing more units than this needs a human click
+
+
+def _propose(action, args, summary):
+    """Queue a destructive action. It runs only when a person confirms it (execute_pending), never from an LLM turn."""
+    pid = "ACT" + uuid.uuid4().hex[:6].upper()
+    c = db()
+    c.execute("INSERT INTO pending VALUES(?,?,?,?,?,?)", (pid, action, json.dumps(args), summary, time.time(), "pending"))
+    c.commit()
+    c.close()
+    return {"pending_confirmation": pid, "summary": summary,
+            "note": "NOT done yet. A person must click Confirm in the dashboard. Tell the user this."}
+
+
+def list_pending():
+    c = db()
+    rows = [dict(r) for r in c.execute("SELECT id, action, summary, created FROM pending WHERE status='pending' ORDER BY created")]
+    c.close()
+    return rows
+
+
+def execute_pending(pid: str, approve: bool = True) -> dict:
+    """Called by the dashboard when a human clicks Confirm / Cancel. Not exposed as an MCP tool."""
+    c = db()
+    row = c.execute("SELECT * FROM pending WHERE id=? AND status='pending'", (pid,)).fetchone()
+    if not row or time.time() - row["created"] > 900:  # proposals expire after 15 minutes
+        c.close()
+        return {"error": "no such pending action, or it expired"}
+    c.execute("UPDATE pending SET status=? WHERE id=?", ("approved" if approve else "cancelled", pid))
+    c.commit()
+    c.close()
+    if not approve:
+        return {"cancelled": pid}
+    a = json.loads(row["args"])
+    if row["action"] == "remove_item":
+        return _remove_item(a["sku"])
+    if row["action"] == "remove_stock":
+        return _remove_stock(a["godown"], a["sku"], a["qty"], a.get("reason", "write-off"))
+    return {"error": "unknown action"}
 
 
 def _catalog():
@@ -89,17 +146,52 @@ def _hav(a, b):
     return 2 * r * math.asin(math.sqrt(h))
 
 
+_COORD = re.compile(r"^\s*\(?\s*(-?\d{1,2}(?:\.\d+)?)\s*°?\s*([NS])?\s*[,;\s]\s*(-?\d{1,3}(?:\.\d+)?)\s*°?\s*([EW])?\s*\)?\s*$", re.I)
+_GEO_CACHE = {}
+GEO_DIAG = {"last": ""}  # why the last Google call failed (shown in hints)
+
+
+def _parse_coords(addr: str):
+    """'13.08, 80.27' / '13.08N 80.27E' / '(13.08,80.27)' -> (lat, lon), else None."""
+    m = _COORD.match(addr or "")
+    if not m:
+        return None
+    lat, lon = float(m.group(1)), float(m.group(3))
+    if (m.group(2) or "").upper() == "S":
+        lat = -abs(lat)
+    if (m.group(4) or "").upper() == "W":
+        lon = -abs(lon)
+    return (lat, lon) if -90 <= lat <= 90 and -180 <= lon <= 180 else None
+
+
 def _geocode(addr: str):
+    """Coordinates -> used directly. Full address -> Google Geocoding (cached). Else offline city lookup."""
+    addr = (addr or "").strip()
+    if addr in _GEO_CACHE:
+        return _GEO_CACHE[addr]
+    out = _geocode_uncached(addr)
+    if out[0] is not None:
+        _GEO_CACHE[addr] = out
+    return out
+
+
+def _geocode_uncached(addr: str):
+    ll = _parse_coords(addr)
+    if ll:
+        return ll, "coordinates"
     key = os.environ.get("GOOGLE_MAPS_API_KEY")
     if os.environ.get("USE_REAL_MAPS") == "1" and key:
         try:
             url = "https://maps.googleapis.com/maps/api/geocode/json?" + urllib.parse.urlencode(
-                {"address": addr, "key": key})
-            with urllib.request.urlopen(url, timeout=4) as r:
-                loc = json.load(r)["results"][0]["geometry"]["location"]
+                {"address": addr, "key": key, "region": "in"})
+            with urllib.request.urlopen(url, timeout=5) as r:
+                data = json.load(r)
+            if data.get("status") == "OK":
+                loc = data["results"][0]["geometry"]["location"]
                 return (loc["lat"], loc["lng"]), "google-maps"
-        except Exception:
-            pass  # self-heal: fall through to offline geocoder
+            GEO_DIAG["last"] = f"google geocoding status {data.get('status')}: {data.get('error_message', '')[:80]}"
+        except Exception as e:
+            GEO_DIAG["last"] = f"google geocoding request failed: {str(e)[:80]}"  # self-heal: fall through
     low = addr.lower()
     for name, ll in CITY.items():
         if name in low:
@@ -110,10 +202,13 @@ def _geocode(addr: str):
 @mcp.tool()
 def check_stock(sku: str, qty: int, destination: str) -> dict:
     """List godowns holding `qty` of `sku`, ranked by distance to the destination address."""
+    if _bad_qty(qty):
+        return {"error": f"qty must be a whole number between 1 and {MAX_QTY}"}
+    destination = _clean(destination, 200)
     dest, src = _geocode(destination)
     if dest is None:
         return {"error": f"could not geocode '{destination}'",
-                "hint": "retry with just the city name, e.g. 'Madurai'"}
+                "hint": "retry with just the city name, e.g. 'Madurai', or latitude,longitude. " + GEO_DIAG["last"]}
     c = db()
     rows = c.execute("SELECT godown, qty FROM stock WHERE sku=?", (sku,)).fetchall()
     c.close()
@@ -134,6 +229,8 @@ def check_stock(sku: str, qty: int, destination: str) -> dict:
 @mcp.tool()
 def reserve_stock(godown: str, sku: str, qty: int) -> dict:
     """Atomically reserve (decrement) stock at a godown."""
+    if _bad_qty(qty):
+        return {"error": f"qty must be a whole number between 1 and {MAX_QTY}"}
     c = db()
     cur = c.execute("UPDATE stock SET qty=qty-? WHERE godown=? AND sku=? AND qty>=?", (qty, godown, sku, qty))
     c.commit()
@@ -147,6 +244,8 @@ def reserve_stock(godown: str, sku: str, qty: int) -> dict:
 @mcp.tool()
 def select_box(sku: str, qty: int) -> dict:
     """Choose the cheapest box that fits total weight and volume for the order."""
+    if _bad_qty(qty):
+        return {"error": f"qty must be a whole number between 1 and {MAX_QTY}"}
     cat = _catalog()
     if sku not in cat:
         return {"error": f"unknown sku {sku}"}
@@ -219,6 +318,7 @@ def get_carrier_quote(carrier: str, distance_km: float, weight_kg: float) -> dic
 def create_shipment(order_id: str, customer: str, destination: str, godown: str, sku: str, qty: int,
                     box: str, carrier: str, price: float, eta_hours: float, box_cost: float = 0.0) -> dict:
     """Create the shipment record, generate tracking ID and customer notification text."""
+    order_id, customer, destination = _clean(order_id, 24), _clean(customer, 60), _clean(destination, 200)
     tid = "TRK" + uuid.uuid4().hex[:8].upper()
     data = dict(tracking_id=tid, order_id=order_id, customer=customer, destination=destination, godown=godown,
                 sku=sku, qty=qty, box=box, carrier=carrier, price=price, eta_hours=eta_hours, status="DISPATCHED")
@@ -246,12 +346,12 @@ def list_catalog() -> dict:
 @mcp.tool()
 def restock(godown: str, sku: str, qty: int) -> dict:
     """Add `qty` units of an existing product to a godown."""
+    if _bad_qty(qty):
+        return {"error": f"qty must be a whole number between 1 and {MAX_QTY}"}
     if godown not in GODOWNS:
         return {"error": f"unknown godown {godown}", "godowns": list(GODOWNS)}
     if sku not in _catalog():
         return {"error": f"unknown sku {sku}", "hint": "use add_item to create a new product"}
-    if qty <= 0:
-        return {"error": "qty must be positive"}
     c = db()
     c.execute("INSERT INTO stock VALUES(?,?,?) ON CONFLICT(godown, sku) DO UPDATE SET qty = qty + ?", (godown, sku, qty, qty))
     c.commit()
@@ -264,13 +364,19 @@ def restock(godown: str, sku: str, qty: int) -> dict:
 def add_item(sku: str, name: str, weight_kg: float, volume_l: float, price: float, cost: float,
              godown: str = "GD-BLR", qty: int = 0) -> dict:
     """Create a new product in the catalog and optionally stock it in a godown."""
-    sku = sku.strip().upper()
-    if not sku or sku in _catalog():
-        return {"error": f"sku '{sku}' is empty or already exists", "hint": "use restock for existing products"}
-    if min(weight_kg, volume_l, price, cost) < 0 or weight_kg == 0 or volume_l == 0:
-        return {"error": "weight, volume must be > 0; price and cost must be >= 0"}
+    sku, name = sku.strip().upper(), _clean(name, 60)
+    if not SKU_RE.match(sku):
+        return {"error": "sku must be 2-24 chars: letters, digits and dashes, e.g. WEBCAM-HD"}
+    if sku in _catalog():
+        return {"error": f"sku '{sku}' already exists", "hint": "use restock for existing products"}
+    if not name:
+        return {"error": "name is required"}
+    if not (0 < weight_kg <= 500 and 0 < volume_l <= 2000 and 0 <= cost <= 10_000_000 and 0 <= price <= 10_000_000):
+        return {"error": "weight 0-500 kg, volume 0-2000 L, price and cost 0-10,000,000 are required"}
+    if qty < 0 or qty > MAX_QTY:
+        return {"error": f"qty must be between 0 and {MAX_QTY}"}
     c = db()
-    c.execute("INSERT INTO catalog VALUES(?,?,?,?,?,?)", (sku, name.strip(), weight_kg, volume_l, price, cost))
+    c.execute("INSERT INTO catalog VALUES(?,?,?,?,?,?)", (sku, name, weight_kg, volume_l, price, cost))
     for g in GODOWNS:  # every godown gets a row so it shows up in the stock table
         c.execute("INSERT OR IGNORE INTO stock VALUES(?,?,0)", (g, sku))
     c.commit()
@@ -281,16 +387,20 @@ def add_item(sku: str, name: str, weight_kg: float, volume_l: float, price: floa
 
 
 @mcp.tool()
-def remove_item(sku: str, force: bool = False) -> dict:
-    """Delete a product from the catalog. Refuses if units are still in stock unless force=True."""
+def remove_item(sku: str) -> dict:
+    """Propose deleting a product from the catalog. This only QUEUES the request; a person must confirm it in the dashboard."""
     sku = sku.strip().upper()
     if sku not in _catalog():
         return {"error": f"unknown sku {sku}"}
     c = db()
     left = c.execute("SELECT COALESCE(SUM(qty),0) t FROM stock WHERE sku=?", (sku,)).fetchone()["t"]
-    if left > 0 and not force:
-        c.close()
-        return {"error": f"{left} units of {sku} are still in stock", "hint": "get the user's confirmation, then call again with force=true"}
+    c.close()
+    return _propose("remove_item", {"sku": sku}, f"Delete product {sku} and discard {left} units in stock")
+
+
+def _remove_item(sku):
+    c = db()
+    left = c.execute("SELECT COALESCE(SUM(qty),0) t FROM stock WHERE sku=?", (sku,)).fetchone()["t"]
     c.execute("DELETE FROM stock WHERE sku=?", (sku,))
     c.execute("DELETE FROM catalog WHERE sku=?", (sku,))
     c.commit()
@@ -305,11 +415,13 @@ def update_item(sku: str, name: str = "", price: float = -1, cost: float = -1,
     sku = sku.strip().upper()
     if sku not in _catalog():
         return {"error": f"unknown sku {sku}"}
-    fields = {"name": name.strip() or None, "price": price if price >= 0 else None, "cost": cost if cost >= 0 else None,
+    fields = {"name": _clean(name, 60) or None, "price": price if price >= 0 else None, "cost": cost if cost >= 0 else None,
               "weight": weight_kg if weight_kg > 0 else None, "volume": volume_l if volume_l > 0 else None}
     fields = {k: v for k, v in fields.items() if v is not None}
     if not fields:
         return {"error": "nothing to change", "hint": "pass at least one of name, price, cost, weight_kg, volume_l"}
+    if any(k in fields and not (0 <= fields[k] <= 10_000_000) for k in ("price", "cost")):
+        return {"error": "price and cost must be between 0 and 10,000,000"}
     c = db()
     c.execute("UPDATE catalog SET " + ", ".join(f"{k}=?" for k in fields) + " WHERE sku=?", (*fields.values(), sku))
     c.commit()
@@ -319,7 +431,16 @@ def update_item(sku: str, name: str = "", price: float = -1, cost: float = -1,
 
 @mcp.tool()
 def remove_stock(godown: str, sku: str, qty: int, reason: str = "write-off") -> dict:
-    """Remove `qty` units from a godown (damage, loss, transfer out). Cannot go below zero."""
+    """Remove `qty` units from a godown (damage, loss, transfer out). Cannot go below zero. Large removals need human confirmation."""
+    if _bad_qty(qty):
+        return {"error": f"qty must be a whole number between 1 and {MAX_QTY}"}
+    if qty > BIG_REMOVAL:
+        return _propose("remove_stock", {"godown": godown, "sku": sku, "qty": qty, "reason": _clean(reason, 80)},
+                        f"Remove {qty} x {sku} from {godown}")
+    return _remove_stock(godown, sku, qty, _clean(reason, 80))
+
+
+def _remove_stock(godown, sku, qty, reason):
     c = db()
     cur = c.execute("UPDATE stock SET qty=qty-? WHERE godown=? AND sku=? AND qty>=? AND ?>0", (qty, godown, sku, qty, qty))
     c.commit()
