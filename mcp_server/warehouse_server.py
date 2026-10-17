@@ -423,7 +423,7 @@ def add_item(sku: str, name: str, weight_kg: float, volume_l: float, price: floa
         return {"error": f"sku '{sku}' already exists", "hint": "use restock for existing products"}
     if not name:
         return {"error": "name is required"}
-    pe = _policy_error(name) or _policy_error(sku.replace("-", " "))
+    pe = _policy_error(name) or (_policy_error(sku.replace("-", " ")) if _DENY.search(sku.replace("-", " ")) else None)
     if pe:
         return pe
     if not (0 < weight_kg <= 500 and 0 < volume_l <= 2000 and 0 <= cost <= 10_000_000 and 0 <= price <= 10_000_000):

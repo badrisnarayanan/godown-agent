@@ -384,6 +384,7 @@ function drawMap(){
   $('map').innerHTML=h}
 drawMap();
 fetch('/api/config').then(r=>r.json()).then(c=>{mapsOn=c.maps;$('tabs').hidden=!c.maps});
+document.getElementById('gmap').onerror=()=>showTab(false);
 function showTab(g){$('gmap').hidden=!g;$('map').style.display=g?'none':'block';$('tab-g').classList.toggle('on',g);$('tab-s').classList.toggle('on',!g)}
 $('tab-s').onclick=()=>showTab(false);$('tab-g').onclick=()=>showTab(true);
 async function loadGmap(geo){if(!mapsOn||!geo||!geo.to)return;try{const r=await fetch('/api/staticmap',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({from:geo.from,to:geo.to,poly:geo.poly})});
@@ -440,6 +441,7 @@ async function af(url,opts={},retry=true){const h={...(opts.headers||{}),'x-admi
 /* ---- views ---- */
 function setView(v){document.body.dataset.view=v;document.querySelectorAll('[data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===v));
   if(v!=='track')stopTrack();else if(!trkTimer){$('track-empty').hidden=false}
+  showTab(false);
   if(v==='orders'||v==='track')drawMap();if(v==='inv'||v==='biz')refresh();if(v==='inv')loadPending();history.replaceState(null,'','#'+v);window.scrollTo(0,0)}
 document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setView(b.dataset.go));
 /* ---- banner: one place that always says where the order is ---- */

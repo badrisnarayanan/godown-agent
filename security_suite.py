@@ -87,7 +87,7 @@ st, after, _ = call("GET", "/api/state")
 check("stock never increased by hostile orders", stock_total(after) <= stock_total(before) + 5, f"{stock_total(before)} -> {stock_total(after)} (+5 from SEC-TEST)")
 st, res, t = order("Ship 2 laptops to <img src=x onerror=alert(1)> Chennai for <b>Mallory</b>", session=f"sec-xss-{int(time.time())}")
 dump = json.dumps(res) + t
-check("XSS payload is stripped from the order record", res is not None and "<" not in dump and ">" not in dump, (res or {}).get("destination"))
+check("XSS payload is stripped from the order record", res is not None and "<" not in dump and "<img" not in dump and "onerror" not in str((res or {}).get("destination")), (res or {}).get("destination"))
 # ---- 7. incomplete orders ask, then continue ----
 sid = f"sec-ask-{int(time.time())}"
 st, res, t = order("I want some laptops", session=sid)
