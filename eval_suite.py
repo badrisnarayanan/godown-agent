@@ -2,6 +2,7 @@
 import asyncio, os, sys, tempfile, time, json
 from dotenv import load_dotenv
 load_dotenv("my_agent/.env")
+os.environ["USE_REAL_MAPS"] = "0"  # evals assume the offline geocoder so address-healing paths are exercised deterministically
 from google.adk.runners import InMemoryRunner
 from google.genai import types
 from my_agent.agent import root_agent
