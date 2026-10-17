@@ -16,6 +16,10 @@ Send an order as a **photo, a voice note or a chat message**. Vegam finds the st
 
 *Tracking: the truck moves along the actual road on the Google map while the timeline advances.*
 
+![Inventory assistant: restocks Chennai from a plain-language request, then politely refuses a non-electronics item](docs/inventory.jpg)
+
+*The inventory agent: "Add 30 monitors to Chennai" restocks the godown and the stock table updates, while "add puppies" is declined because Vegam handles consumer electronics only.*
+
 ## How this maps to the judging criteria
 
 | Criterion | What we built | Where to see it |
