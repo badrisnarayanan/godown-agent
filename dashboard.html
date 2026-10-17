@@ -1,107 +1,372 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Godown Agent</title>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Vegam Logistics</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700;800&family=Source+Sans+3:wght@400;600;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0b0f14;--card:#121923;--line:#1f2a38;--tx:#e6edf5;--mut:#8aa0b6;--ok:#3ddc97;--warn:#ffb454;--bad:#ff6b6b;--acc:#5aa9ff;--learn:#c792ea}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 system-ui,sans-serif}
-header{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;gap:14px;align-items:center;flex-wrap:wrap}
-h1{font-size:18px;margin:0}.sub{color:var(--mut);font-size:12px}
-.pill{background:#1a2431;border:1px solid var(--line);border-radius:99px;padding:3px 10px;font-size:12px;color:var(--mut)}
-main{display:grid;grid-template-columns:320px 1fr 340px;gap:14px;padding:14px;max-width:1500px;margin:auto}
-@media(max-width:1000px){main{grid-template-columns:1fr}}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px}
-.card h2{font-size:12px;letter-spacing:.08em;text-transform:uppercase;color:var(--mut);margin:0 0 10px}
-textarea{width:100%;background:#0d1219;color:var(--tx);border:1px solid var(--line);border-radius:8px;padding:10px;font:inherit;min-height:70px;resize:vertical}
-button{background:var(--acc);color:#04101f;border:0;border-radius:8px;padding:8px 12px;font-weight:600;cursor:pointer;font:inherit;font-weight:600}
-button.sec{background:#1a2431;color:var(--tx);border:1px solid var(--line)}button:disabled{opacity:.5}
-.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
-.stage{display:grid;grid-template-columns:28px 1fr auto;gap:10px;padding:10px;border:1px solid var(--line);border-radius:10px;margin-bottom:8px;opacity:.45;transition:.25s}
-.stage.on{opacity:1;border-color:var(--ok)}.stage .dot{width:22px;height:22px;border-radius:50%;background:#1f2a38;display:grid;place-items:center;font-size:12px}
-.stage.on .dot{background:var(--ok);color:#04201a}.stage b{display:block}.stage small{color:var(--mut)}.t{color:var(--mut);font-size:12px}
-.ev{padding:8px 10px;border-left:3px solid var(--warn);background:#1a1710;border-radius:6px;margin-bottom:6px;font-size:13px}
-.ev.learned{border-color:var(--learn);background:#17131f}.ev.err{border-color:var(--bad);background:#1f1212}
-table{width:100%;border-collapse:collapse;font-size:13px}td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:right}th:first-child,td:first-child{text-align:left}th{color:var(--mut);font-weight:500}
-.low{color:var(--bad)}.ship{border:1px dashed var(--ok);border-radius:10px;padding:10px;margin-top:8px}
-.big{font-size:22px;font-weight:700}.lesson{font-size:12px;color:var(--mut);border-bottom:1px solid var(--line);padding:5px 0}.lesson b{color:var(--learn)}
-.empty{color:var(--mut);font-size:13px}.k{display:flex;gap:18px;margin-top:6px}.k div{font-size:12px;color:var(--mut)}
-</style></head><body>
-<header><div><h1>Godown Agent</h1><div class="sub">Photo / voice / text order &rarr; dispatched shipment, no human steps</div></div>
-<span class="pill">1 LLM call on the happy path</span><span class="pill">MCP warehouse server</span><span class="pill">Jev healer</span></header>
-<main>
-<section>
- <div class="card"><h2>1. Send an order</h2>
-  <textarea id="txt" placeholder="e.g. 3 laptops to Chennai for Ravi">PO ORD-101 Ravi: 3 laptops to Chennai</textarea>
-  <div class="row"><input type="file" id="file" accept="image/*,audio/*" style="display:none">
-   <button id="go">Dispatch</button><button class="sec" onclick="file.click()">Attach photo / voice</button><span id="fname" class="t"></span></div>
-  <h2 style="margin-top:14px">One-click demos</h2>
-  <div class="row">
-   <button class="sec" onclick="demo('text','PO ORD-201 Priya: 3 laptops to Madurai')">Happy path</button>
-   <button class="sec" onclick="demo('text','PO ORD-202 Ravi: 3 laptops to Chennai')">Out of stock</button>
-   <button class="sec" onclick="demo('text','PO ORD-203 Meena: 70 laptops to Hyderabad')">Split order</button>
-   <button class="sec" onclick="demo('text','PO ORD-204 Anu: 2 keyboards to Kovai (Peelamedu)')">Bad address &rarr; learn</button>
-   <button class="sec" onclick="demo('text','PO ORD-205 Kumar: 500 laptops to Pune')">Shortfall</button>
-   <button class="sec" onclick="demo('img','/samples/order1.png')">PO photo</button>
-   <button class="sec" onclick="demo('img','/samples/voice1.wav')">Voice note</button>
+:root{
+  --concrete:#E6EAEE; --paper:#F7F8F9; --ink:#13202B; --mute:#5C6B78; --line:#C9D1D9;
+  --yellow:#F2B01E; --red:#D6402B; --teal:#12806F; --violet:#6B4FBB; --map:#DCE3E9;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+html,body{margin:0}
+body{background:var(--concrete);color:var(--ink);font:15px/1.5 "Source Sans 3",system-ui,sans-serif}
+h1,h2,h3,.cond{font-family:"Barlow Condensed","Arial Narrow",sans-serif;margin:0;font-weight:700;letter-spacing:.01em}
+button{font:inherit;cursor:pointer}
+:focus-visible{outline:3px solid var(--yellow);outline-offset:2px}
+
+header{display:flex;align-items:flex-end;gap:28px;padding:18px 24px 14px;border-bottom:3px solid var(--ink);background:var(--paper)}
+.brand{font-size:44px;line-height:.9;font-weight:800;text-transform:uppercase}
+.brand span{background:var(--yellow);padding:0 8px;margin-right:6px}
+.tag{max-width:380px;color:var(--mute);font-size:14px}
+.stats{margin-left:auto;display:flex;gap:26px}
+.stat b{display:block;font:700 30px/1 "Barlow Condensed";}
+.stat small{color:var(--mute);font-size:12px}
+
+main{display:grid;grid-template-columns:290px minmax(0,1fr) 330px;gap:0;min-height:calc(100vh - 82px)}
+.rail,.ledger{background:var(--paper);padding:18px}
+.rail{border-right:1px solid var(--line)}
+.ledger{border-left:1px solid var(--line)}
+.stage-area{padding:18px 22px;display:flex;flex-direction:column;gap:16px;min-width:0}
+@media(max-width:1100px){main{grid-template-columns:1fr}.rail,.ledger{border:0}.stats{display:none}}
+
+h2{font-size:22px;margin:0 0 8px}
+.hint{color:var(--mute);font-size:13px}
+textarea{width:100%;min-height:72px;resize:vertical;border:2px solid var(--ink);background:#fff;border-radius:2px;padding:9px;font:inherit}
+.btn{border:2px solid var(--ink);background:#fff;color:var(--ink);padding:7px 12px;border-radius:2px;font-weight:600}
+.btn:hover{background:var(--concrete)}
+.btn.primary{background:var(--yellow);box-shadow:3px 3px 0 var(--ink)}
+.btn.primary:active{transform:translate(2px,2px);box-shadow:1px 1px 0 var(--ink)}
+.btn:disabled{opacity:.5;cursor:wait}
+.row{display:flex;flex-wrap:wrap;gap:7px;margin:8px 0}
+.group{margin-top:16px;padding-top:12px;border-top:1px solid var(--line)}
+.group h3{font-size:17px;margin-bottom:2px}
+.chip{border:1.5px solid var(--ink);background:#fff;border-radius:99px;padding:4px 11px;font-size:13px;font-weight:600}
+.chip:hover{background:var(--yellow)}
+.chip.x{border-color:var(--red);color:var(--red)}.chip.x:hover{background:var(--red);color:#fff}
+.chip.m{border-color:var(--violet);color:var(--violet)}.chip.m:hover{background:var(--violet);color:#fff}
+.toggle{display:flex;gap:8px;align-items:flex-start;font-size:13px;margin-top:10px}
+.toggle input{margin-top:3px;accent-color:var(--red)}
+
+/* map */
+.mapwrap{background:var(--map);border:2px solid var(--ink);position:relative}
+.mapwrap svg{display:block;width:100%;height:auto;max-height:54vh}
+.maptitle{position:absolute;left:12px;top:8px;font:700 15px "Barlow Condensed";letter-spacing:.06em}
+.legend{position:absolute;right:12px;bottom:8px;display:flex;gap:12px;font-size:12px;color:var(--mute)}
+.legend i{display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+.india{fill:#F7F8F9;stroke:var(--ink);stroke-width:1.4;stroke-linejoin:round}
+.city{fill:var(--mute)}.cityl{font-size:9px;fill:var(--mute)}
+.gd rect{fill:var(--ink)}.gd.oos rect{fill:var(--red)}.gd.src rect{fill:var(--teal)}
+.gd text{font:700 11px "Barlow Condensed";fill:var(--ink)}
+.route{fill:none;stroke:var(--teal);stroke-width:3;stroke-dasharray:7 6;animation:dash 1s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-26}}
+.pulse{fill:none;stroke:var(--red);stroke-width:2;animation:pulse 1.2s ease-out 3}
+@keyframes pulse{from{r:6;opacity:1}to{r:26;opacity:0}}
+@media(prefers-reduced-motion:reduce){.route,.pulse{animation:none}}
+
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(5,1fr);border:2px solid var(--ink);background:var(--paper)}
+.step{padding:10px 12px;border-right:1px solid var(--line);position:relative;min-height:92px}
+.step:last-child{border-right:0}
+.step h3{font-size:17px;display:flex;justify-content:space-between;gap:6px;color:var(--mute)}
+.step p{margin:4px 0 0;font-size:12.5px;color:var(--mute);overflow-wrap:anywhere}
+.step .t{font:600 13px "Barlow Condensed";}
+.step.on{background:#fff}.step.on h3{color:var(--ink)}.step.on p{color:var(--ink)}
+.step.on::after{content:"";position:absolute;left:0;right:0;bottom:0;height:5px;background:var(--teal)}
+.step.cur::after{background:var(--yellow)}
+@media(max-width:900px){.pipe{grid-template-columns:1fr}.step{border-right:0;border-bottom:1px solid var(--line)}}
+
+/* log */
+.log{background:var(--paper);border:2px solid var(--ink);padding:12px 14px}
+.ev{display:grid;grid-template-columns:76px 1fr;gap:10px;padding:7px 0;border-bottom:1px solid var(--line)}
+.ev:last-child{border:0}
+.ev b{font:700 14px "Barlow Condensed";letter-spacing:.04em}
+.ev.heal b{color:var(--red)}.ev.learned b{color:var(--violet)}
+.empty{color:var(--mute);font-size:14px}
+
+/* ledger */
+.label{border:2px solid var(--ink);background:#fff;padding:12px;position:relative}
+.label.ok{border-color:var(--teal)}.label.part{border-color:var(--yellow)}
+.status{font:800 34px/1 "Barlow Condensed";text-transform:uppercase}
+.label.ok .status{color:var(--teal)}
+.barcode{height:26px;margin:10px 0 4px;background:repeating-linear-gradient(90deg,var(--ink) 0 2px,transparent 2px 4px,var(--ink) 4px 5px,transparent 5px 9px,var(--ink) 9px 12px,transparent 12px 14px)}
+.trk{font:700 18px "Barlow Condensed";letter-spacing:.08em}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 10px;font-size:13px;margin-top:6px}.kv span{color:var(--mute)}
+.meter{display:flex;gap:18px;margin-top:10px}.meter div{font-size:12px;color:var(--mute)}.meter b{display:block;font:700 26px/1 "Barlow Condensed";color:var(--ink)}
+.meter .v b{color:var(--violet)}
+.sku{margin:9px 0}
+.sku b{font-size:12px;display:block}
+.bars{display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+.bar{background:var(--concrete);height:18px;position:relative}
+.bar i{position:absolute;left:0;top:0;bottom:0;background:var(--ink);transition:width .5s}
+.bar.z i{background:var(--red);width:100%!important;opacity:.18}
+.bar span{position:absolute;left:5px;top:0;line-height:18px;font:700 11px "Barlow Condensed";mix-blend-mode:normal;color:var(--ink);text-shadow:0 0 3px #fff,0 0 3px #fff}
+.bar.z span{color:var(--red)}
+.cols{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;font:700 11px "Barlow Condensed";color:var(--mute)}
+.lesson{font-size:13px;padding:6px 0;border-bottom:1px solid var(--line)}
+.lesson b{font:700 13px "Barlow Condensed";color:var(--violet);margin-right:4px}
+.lesson em{font-style:normal;color:var(--mute)}
+.sec{margin-top:18px}
+
+.chip.rec,.btn.rec{background:var(--red);color:#fff;border-color:var(--red);animation:blink 1s infinite}
+@keyframes blink{50%{opacity:.6}}
+.tabs{position:absolute;right:12px;top:8px;display:flex;gap:0;z-index:2}
+.tabs button{border:2px solid var(--ink);background:#fff;padding:2px 10px;font:700 13px "Barlow Condensed";letter-spacing:.04em}
+.tabs button.on{background:var(--ink);color:#fff}
+#gmap{display:block;width:100%;max-height:54vh;object-fit:cover}
+.qrow{display:grid;grid-template-columns:96px 1fr 44px;gap:8px;align-items:center;font-size:12.5px;margin:4px 0}
+.qbar{height:12px;background:var(--concrete)}.qbar i{display:block;height:100%;background:var(--mute)}.qrow.win .qbar i{background:var(--teal)}.qrow.win b{color:var(--teal)}
+.badge{display:inline-block;font:700 11px "Barlow Condensed";letter-spacing:.05em;padding:1px 6px;border:1.5px solid var(--ink);margin-left:6px;background:#fff}
+.badge.live{border-color:var(--teal);color:var(--teal)}
+.dgrid{display:grid;grid-template-columns:auto 1fr;gap:3px 10px;font-size:13px}.dgrid span{color:var(--mute)}
+
+.uh{display:flex;flex-wrap:wrap;gap:6px 14px;align-items:center;font-size:12.5px;color:var(--mute);border-top:2px solid var(--ink);padding-top:8px;margin-top:2px}
+.uh b{font:700 15px "Barlow Condensed";letter-spacing:.06em;text-transform:none;color:var(--ink);background:var(--yellow);padding:0 7px}
+.uh span::before{content:"";display:inline-block;width:6px;height:6px;background:var(--mute);margin-right:6px;vertical-align:1px}
+.uh2{font:700 15px "Barlow Condensed";letter-spacing:.06em;background:var(--yellow);display:inline-block;padding:0 7px;margin-top:20px;border-top:0}
+code.tool{display:block;font:600 11px ui-monospace,Menlo,monospace;color:var(--mute);margin-top:2px}
+.step.on code.tool{color:var(--teal)}
+.sms{margin-top:10px;background:var(--concrete);border-radius:10px 10px 10px 2px;padding:8px 10px;font-size:13px;position:relative}
+.sms small{display:block;color:var(--mute);font-size:11px;margin-bottom:2px}
+.tl{margin:8px 0 0;padding:0;list-style:none}
+.tl li{display:grid;grid-template-columns:18px 1fr;gap:8px;font-size:13px;padding:4px 0;color:var(--mute);position:relative}
+.tl li i{width:12px;height:12px;border:2px solid var(--mute);border-radius:50%;margin-top:4px;background:#fff}
+.tl li.d{color:var(--ink)}.tl li.d i{background:var(--teal);border-color:var(--teal)}
+.tl li.d:not(:last-child)::after{content:"";position:absolute;left:6px;top:19px;bottom:-5px;width:2px;background:var(--teal)}
+.track{display:flex;gap:6px;margin:8px 0}
+.track input{flex:1;border:2px solid var(--ink);padding:6px 8px;font:600 14px "Barlow Condensed";letter-spacing:.06em;text-transform:uppercase;min-width:0}
+.biz{background:var(--paper);border:2px solid var(--ink);padding:12px 14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin:6px 0 12px}
+.kpi small{display:block;color:var(--mute);font-size:12px}.kpi b{font:700 26px/1.1 "Barlow Condensed"}
+.kpi.m b{color:var(--teal)}.kpi.neg b{color:var(--red)}
+.split{display:flex;height:16px;margin:4px 0 6px;border:1.5px solid var(--ink)}.split i{display:block;height:100%}
+.sk{display:flex;gap:14px;flex-wrap:wrap;font-size:12.5px;color:var(--mute)}.sk span i{display:inline-block;width:9px;height:9px;margin-right:4px}
+.unit{display:grid;grid-template-columns:110px 1fr 90px;gap:8px;align-items:center;font-size:12.5px;margin:3px 0}
+</style>
+</head>
+<body>
+<header>
+  <div class="brand"><span>Vegam</span>Logistics</div>
+  <div class="tag"><b>Order to doorstep, with nobody in between.</b> Send a photo, a voice note or a message. Vegam finds the stock, packs it, books the fastest carrier and texts your customer the tracking link.</div>
+  <div class="stats">
+    <div class="stat"><b id="st-ship">0</b><small>orders dispatched</small></div>
+    <div class="stat"><b id="st-les">0</b><small>lessons remembered</small></div>
+    <div class="stat"><b id="st-time">-</b><small>last order, seconds</small></div>
   </div>
-  <div class="row"><button class="sec" onclick="reset()">Reset warehouse &amp; memory</button></div>
-  <div class="t" style="margin-top:8px">Tip: run <b>Bad address &rarr; learn</b> twice. The second run skips the healer.</div>
- </div>
+</header>
+
+<main>
+<aside class="rail">
+  <h2>Place an order</h2>
+  <textarea id="txt" aria-label="Order text" placeholder="e.g. 3 laptops to Chennai for Ravi"></textarea>
+  <input type="file" id="file" accept="image/*,audio/*" hidden>
+  <div class="row">
+    <button class="btn primary" id="go">Place order</button>
+    <button class="btn" id="mic">Speak an order</button>
+    <button class="btn" id="attach">Attach file</button>
+  </div>
+  <div id="fname" class="hint"></div>
+
+  <div class="group"><h3>Quick orders</h3>
+    <div class="row">
+      <button class="chip" data-t="PO ORD-201 Priya: 3 laptops to Madurai">3 laptops to Madurai</button>
+      <button class="chip" data-t="PO ORD-206 Asha: 5 monitors to Chennai">5 monitors to Chennai</button>
+    </div></div>
+  <div class="group"><h3>When things go wrong</h3>
+    <div class="hint">Demo scenarios. Watch Vegam recover, on the map and in the log.</div>
+    <div class="row">
+      <button class="chip x" data-t="PO ORD-202 Ravi: 3 laptops to Chennai">Nearest godown is empty</button>
+      <button class="chip x" data-t="PO ORD-203 Meena: 70 laptops to Hyderabad">Order too big for one godown</button>
+      <button class="chip x" data-t="PO ORD-204 Anu: 2 keyboards to Kovai (Peelamedu)">Address nobody can geocode</button>
+      <button class="chip x" data-t="PO ORD-205 Kumar: 500 laptops to Pune">More than all stock</button>
+    </div></div>
+  <div class="group"><h3>Order by photo or voice</h3>
+    <div class="row">
+      <button class="chip m" data-img="/samples/order1.png">Photo of a purchase order</button>
+      <button class="chip m" data-img="/samples/voice1.wav">Voice note</button>
+    </div></div>
+  <div class="group"><h3>Track a shipment</h3>
+    <div class="track"><input id="tid" placeholder="TRACKING ID" aria-label="Tracking ID"><button class="btn" id="trackgo">Track</button></div>
+    <div class="row" id="recent"></div></div>
+  <div class="group"><h3>It remembers</h3>
+    <div class="hint">Send "Address nobody can geocode" twice. The second time Vegam already knows the address and skips the fixer.</div>
+    <label class="toggle"><input type="checkbox" id="chaos" checked><span>Carrier FastFreight goes down on its first request</span></label>
+    <div class="row"><button class="btn" id="reset">Reset stock and memory</button></div>
+  </div>
+</aside>
+
+<section class="stage-area">
+  <div class="mapwrap" aria-label="Route map">
+    <div class="maptitle">LIVE SHIPMENT</div>
+    <div class="tabs" id="tabs" hidden><button id="tab-s" class="on">Schematic</button><button id="tab-g">Google Maps</button></div>
+    <img id="gmap" alt="Google Maps route" hidden>
+    <svg id="map" viewBox="0 0 620 640" role="img" aria-label="Map of India with godowns and the current route"></svg>
+    <div class="legend"><span><i style="background:var(--ink)"></i>godown</span><span><i style="background:var(--red)"></i>out of stock</span><span><i style="background:var(--teal)"></i>shipping from</span></div>
+  </div>
+
+  <div class="uh"><b>Under the hood</b><span>Gemini reads the order</span><span>Python engine calls our MCP warehouse server</span><span>Jev decides when something breaks</span><span>Google Maps routes it</span></div>
+  <div class="pipe" id="pipe">
+    <div class="step" id="s-intake"><h3>Read order <span class="t" id="t-intake"></span></h3><code class="tool">Gemini vision / audio</code><p id="d-intake">Gemini reads the photo, voice or text.</p></div>
+    <div class="step" id="s-godown"><h3>Find stock <span class="t" id="t-godown"></span></h3><code class="tool">check_stock, reserve_stock</code><p id="d-godown">Nearest godown that has it.</p></div>
+    <div class="step" id="s-packroute"><h3>Pack and route <span class="t" id="t-packroute"></span></h3><code class="tool">select_box || get_route</code><p id="d-packroute">Box size and distance, in parallel.</p></div>
+    <div class="step" id="s-carrier"><h3>Pick carrier <span class="t" id="t-carrier"></span></h3><code class="tool">get_carrier_quote x3</code><p id="d-carrier">Three quotes at once, fastest wins.</p></div>
+    <div class="step" id="s-result"><h3>Dispatch <span class="t" id="t-result"></span></h3><code class="tool">create_shipment</code><p id="d-result">Tracking ID and customer message.</p></div>
+  </div>
+
+  <div class="biz"><h2>Business today</h2><div class="kpis" id="kpis"></div><div id="bizsplit"></div><div id="bysku"></div></div>
+
+  <div class="log">
+    <h2>Problems Vegam solved on its own</h2>
+    <div id="log"><div class="empty">Nothing has gone wrong yet. Try one of the "When things go wrong" orders.</div></div>
+  </div>
 </section>
-<section>
- <div class="card"><h2>2. Pipeline <span id="clock" class="t"></span></h2>
-  <div class="stage" id="s-intake"><div class="dot">1</div><div><b>Intake (Gemini, multimodal)</b><small id="d-intake">reads photo / voice / text into an order</small></div><span class="t" id="t-intake"></span></div>
-  <div class="stage" id="s-godown"><div class="dot">2</div><div><b>Godown (MCP)</b><small id="d-godown">nearest godown with stock, reserve</small></div><span class="t" id="t-godown"></span></div>
-  <div class="stage" id="s-packroute"><div class="dot">3</div><div><b>Packaging &#8741; Routing (parallel)</b><small id="d-packroute">box size and distance</small></div><span class="t" id="t-packroute"></span></div>
-  <div class="stage" id="s-carrier"><div class="dot">4</div><div><b>Carriers (parallel quotes)</b><small id="d-carrier">fastest ETA wins</small></div><span class="t" id="t-carrier"></span></div>
-  <div class="stage" id="s-result"><div class="dot">5</div><div><b>Dispatch &amp; audit</b><small id="d-result">tracking ID and customer notification</small></div><span class="t" id="t-result"></span></div>
- </div>
- <div class="card" style="margin-top:14px"><h2>3. Self-healing &amp; learning log</h2><div id="log"><div class="empty">Nothing went wrong yet.</div></div></div>
-</section>
-<section>
- <div class="card"><h2>Result</h2><div id="res" class="empty">Waiting for an order.</div>
-  <div class="k" id="metrics"></div></div>
- <div class="card" style="margin-top:14px"><h2>Warehouse stock (live)</h2><div id="stock"></div></div>
- <div class="card" style="margin-top:14px"><h2>Memory: lessons learned</h2><div id="lessons"><div class="empty">No lessons yet.</div></div></div>
-</section>
+
+<aside class="ledger">
+  <h2>Your shipment</h2>
+  <div id="res" class="empty">No order yet.</div>
+  <div class="meter" id="meter"></div>
+
+  <div id="trackbox" class="sec" hidden><h2>Tracking <span id="trk-id" class="badge"></span></h2><div id="trk-eta" style="font-weight:600"></div><ul class="tl" id="trk-tl"></ul></div>
+  <div class="uh2">Under the hood</div>
+  <div class="sec" style="margin-top:6px"><h2>Order details</h2><div id="details" class="empty">Appears once an order is read.</div></div>
+
+  <div class="sec"><h2>Stock by godown</h2>
+    <div class="cols"><span>Bengaluru</span><span>Chennai</span><span>Hyderabad</span></div>
+    <div id="stock"></div></div>
+
+  <div class="sec"><h2>What Vegam has learned</h2><div id="lessons"><div class="empty">Nothing learned yet. Fixes appear here and get reused.</div></div></div>
+</aside>
 </main>
+
 <script>
-const $=id=>document.getElementById(id);let fileData=null;
-$('file').onchange=async e=>{const f=e.target.files[0];if(!f)return;fileData=await toB64(f);$('fname').textContent=f.name};
+const $=id=>document.getElementById(id);
+const GD={'GD-BLR':{n:'Bengaluru',ll:[12.9716,77.5946]},'GD-CHN':{n:'Chennai',ll:[13.0827,80.2707]},'GD-HYD':{n:'Hyderabad',ll:[17.385,78.4867]}};
+const CITIES={Mumbai:[19.076,72.8777],Delhi:[28.6139,77.209],Kolkata:[22.5726,88.3639],Pune:[18.5204,73.8567],Kochi:[9.9312,76.2673],Coimbatore:[11.0168,76.9558],Madurai:[9.9252,78.1198]};
+const OUT=[[74.5,36.8],[77.5,35.6],[79,34.2],[78.8,32.5],[80.5,30.5],[81,30.2],[84,28.6],[88,27.9],[88.9,27.1],[89.8,26.8],[92,26.8],[92,28],[95,29.2],[97.3,28.2],[96,27],[95,26],[94.5,24.5],[93.3,23],[92.3,21.8],[92.2,23.5],[91.5,24.2],[90,25.2],[89,26.2],[88.4,25.5],[88.1,24.3],[88.8,22],[87,21.5],[86.5,20.2],[84.8,19],[82.3,16.8],[80.2,15.5],[80.3,13.5],[79.8,11.5],[79.3,10.3],[78,8.8],[77.5,8],[76.5,9.2],[75.5,12],[74.7,14.5],[73.5,16.5],[72.8,19.2],[72.8,21],[70.5,20.8],[69,22.3],[70.5,23.3],[68.3,23.6],[68.8,24.5],[70.3,25],[70,27],[72,28.6],[73.5,30.5],[74.5,32],[74,34]];
+const X=lon=>(lon-67)/(98.5-67)*620, Y=lat=>(37.5-lat)/(37.5-6.5)*640;
+const P=ll=>[X(ll[1]??ll[0]),Y(ll[0])];
+const proj=(lon,lat)=>[X(lon),Y(lat)];
+let oos={},src=null,route=null,fileData=null,D={},mapsOn=false,truck=null,trkTimer=null;
+
+function drawMap(){
+  const pts=OUT.map(p=>proj(p[0],p[1]).map(n=>n.toFixed(1)).join(',')).join(' ');
+  let h=`<polygon class="india" points="${pts}"/>`;
+  for(const [n,ll] of Object.entries(CITIES)){const [x,y]=P(ll);h+=`<circle class="city" cx="${x}" cy="${y}" r="2.5"/><text class="cityl" x="${x+6}" y="${y+3}">${n}</text>`}
+  if(route&&route.to){const a=P(route.from),b=P(route.to),mx=(a[0]+b[0])/2,my=Math.min(a[1],b[1])-50;
+    h+=`<path id="rt" class="route" d="M${a[0]},${a[1]} Q${mx},${my} ${b[0]},${b[1]}"/>`;
+    if(!truck)h+=`<circle r="6" fill="var(--yellow)" stroke="var(--ink)" stroke-width="2"><animateMotion dur="2.4s" repeatCount="indefinite"><mpath href="#rt"/></animateMotion></circle>`;
+    else{const t=P(truck);h+=`<circle cx="${t[0]}" cy="${t[1]}" r="9" fill="var(--yellow)" stroke="var(--ink)" stroke-width="3"/><text x="${t[0]+13}" y="${t[1]-8}" style="font:700 12px 'Barlow Condensed'">TRUCK</text>`}
+    h+=`<circle cx="${b[0]}" cy="${b[1]}" r="7" fill="var(--yellow)" stroke="var(--ink)" stroke-width="2.5"/><text x="${b[0]+11}" y="${b[1]+4}" style="font:700 12px 'Barlow Condensed'">DELIVERY</text>`}
+  for(const [id,g] of Object.entries(GD)){const [x,y]=P(g.ll),cls=(oos[id]?'oos ':'')+(src===id?'src':'');
+    h+=`<g class="gd ${cls}"><rect x="${x-8}" y="${y-8}" width="16" height="16"/>${oos[id]?`<circle class="pulse" cx="${x}" cy="${y}" r="6"/>`:''}<text x="${x-8}" y="${y+24}">${g.n.toUpperCase()}${oos[id]?' (EMPTY)':''}</text></g>`}
+  $('map').innerHTML=h}
+drawMap();
+fetch('/api/config').then(r=>r.json()).then(c=>{mapsOn=c.maps;$('tabs').hidden=!c.maps});
+function showTab(g){$('gmap').hidden=!g;$('map').style.display=g?'none':'block';$('tab-g').classList.toggle('on',g);$('tab-s').classList.toggle('on',!g)}
+$('tab-s').onclick=()=>showTab(false);$('tab-g').onclick=()=>showTab(true);
+async function loadGmap(geo){if(!mapsOn||!geo||!geo.to)return;try{const r=await fetch('/api/staticmap',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({from:geo.from,to:geo.to,poly:geo.poly})});
+  if(r.ok){$('gmap').src=URL.createObjectURL(await r.blob());showTab(true)}}catch(_){}}
+
+/* voice: record in the browser, convert to 16 kHz WAV (Gemini-friendly) */
+let rec=null,chunks=[];
+$('mic').onclick=async()=>{
+  if(rec){rec.stop();return}
+  let st;try{st=await navigator.mediaDevices.getUserMedia({audio:true})}catch(e){$('fname').textContent='Microphone blocked. Allow it in the address bar, or attach a recording.';return}
+  chunks=[];rec=new MediaRecorder(st);rec.ondataavailable=e=>chunks.push(e.data);
+  rec.onstop=async()=>{st.getTracks().forEach(t=>t.stop());rec=null;$('mic').textContent='Speak an order';$('mic').classList.remove('rec');
+    fileData={b64:await toWav(new Blob(chunks)),mime:'audio/wav'};$('txt').value='';$('fname').textContent='Voice order recorded';run()};
+  rec.start();$('mic').textContent='Stop and send';$('mic').classList.add('rec');$('fname').textContent='Listening... say item, quantity and city'};
+async function toWav(blob){const ctx=new AudioContext();const buf=await ctx.decodeAudioData(await blob.arrayBuffer());
+  const off=new OfflineAudioContext(1,Math.max(1,Math.ceil(buf.duration*16000)),16000);const src=off.createBufferSource();src.buffer=buf;src.connect(off.destination);src.start();
+  const pcm=(await off.startRendering()).getChannelData(0),n=pcm.length,ab=new ArrayBuffer(44+n*2),v=new DataView(ab);
+  const w=(o,t)=>[...t].forEach((c,i)=>v.setUint8(o+i,c.charCodeAt(0)));
+  w(0,'RIFF');v.setUint32(4,36+n*2,true);w(8,'WAVEfmt ');v.setUint32(16,16,true);v.setUint16(20,1,true);v.setUint16(22,1,true);v.setUint32(24,16000,true);v.setUint32(28,32000,true);v.setUint16(32,2,true);v.setUint16(34,16,true);w(36,'data');v.setUint32(40,n*2,true);
+  for(let i=0;i<n;i++)v.setInt16(44+i*2,Math.max(-1,Math.min(1,pcm[i]))*0x7fff,true);
+  let bin='';const u=new Uint8Array(ab);for(let i=0;i<u.length;i+=0x8000)bin+=String.fromCharCode.apply(null,u.subarray(i,i+0x8000));return btoa(bin)}
+
+function renderDetails(){const o=D.order,r=D.route,b=D.box,q=D.quotes;let h='';
+  if(o)h+=`<div class="dgrid"><span>Customer</span><b>${esc(o.customer)}</b><span>Order</span><b>${esc(o.order_id)}</b><span>Item</span><b>${o.qty} x ${esc(o.sku)}</b><span>Deliver to</span><b>${esc(o.destination)}</b></div>`;
+  if(r)h+=`<div class="dgrid" style="margin-top:8px"><span>Distance</span><b>${r.distance_km} km<em class="badge ${/routes-api/.test(r.source)?'live':''}">${/routes-api/.test(r.source)?'GOOGLE ROUTES':'ESTIMATE'}</em></b><span>Drive time</span><b>${r.drive_hours} h</b>${b?`<span>Box</span><b>${b.box} x${b.boxes}, ${b.total_weight_kg} kg</b>`:''}</div>`;
+  if(q&&q.length){const mx=Math.max(...q.map(x=>x.eta_hours));h+=`<div style="margin-top:10px;font-size:12px;color:var(--mute)">Carrier quotes, delivery time</div>`+q.slice().sort((a,b)=>a.eta_hours-b.eta_hours).map(x=>`<div class="qrow ${x.carrier===D.chosen?'win':''}"><b>${esc(x.carrier)}</b><div class="qbar"><i style="width:${x.eta_hours/mx*100}%"></i></div><span>${x.eta_hours}h</span></div>`).join('')}
+  if(h){$('details').className='';$('details').innerHTML=h}}
+$('attach').onclick=()=>$('file').click();
+$('file').onchange=async e=>{const f=e.target.files[0];if(f){fileData=await toB64(f);$('fname').textContent='Attached: '+f.name}};
 function toB64(f){return new Promise(r=>{const x=new FileReader();x.onload=()=>r({b64:x.result.split(',')[1],mime:f.type||'application/octet-stream'});x.readAsDataURL(f)})}
-async function demo(kind,v){if(kind==='text'){$('txt').value=v;fileData=null;$('fname').textContent='';return run()}
- const b=await (await fetch(v)).blob();const f=new File([b],v.split('/').pop(),{type:v.endsWith('.wav')?'audio/wav':'image/png'});fileData=await toB64(f);$('fname').textContent=f.name;$('txt').value='';run()}
+document.querySelectorAll('[data-t]').forEach(b=>b.onclick=()=>{$('txt').value=b.dataset.t;fileData=null;$('fname').textContent='';run()});
+document.querySelectorAll('[data-img]').forEach(b=>b.onclick=async()=>{const u=b.dataset.img;const blob=await (await fetch(u)).blob();
+  const f=new File([blob],u.split('/').pop(),{type:u.endsWith('.wav')?'audio/wav':'image/png'});fileData=await toB64(f);$('txt').value='';$('fname').textContent='Attached: '+f.name;run()});
 $('go').onclick=run;
-function resetUI(){['intake','godown','packroute','carrier','result'].forEach(s=>{$('s-'+s).classList.remove('on');$('t-'+s).textContent=''});
- $('log').innerHTML='';$('res').className='empty';$('res').textContent='Running...';$('metrics').innerHTML='';}
+$('reset').onclick=async()=>{await fetch('/api/reset',{method:'POST'});resetUI(true);refresh()};
+
+function resetUI(full){stopTrack();oos={};src=null;route=null;D={};$('details').className='empty';$('details').textContent='Appears once an order is read.';showTab(false);drawMap();
+  ['intake','godown','packroute','carrier','result'].forEach(s=>{$('s-'+s).classList.remove('on','cur');$('t-'+s).textContent=''});
+  $('log').innerHTML='<div class="empty">'+(full?'Memory and stock reset.':'Running...')+'</div>';$('res').className='empty';$('res').textContent=full?'No order yet.':'Dispatching...';$('meter').innerHTML=''}
+
+const Q=[];let busy=false,lastTotal=null;
 async function run(){resetUI();$('go').disabled=true;
- const body={text:$('txt').value,...(fileData?{file_b64:fileData.b64,mime:fileData.mime}:{})};
- const r=await fetch('/api/order',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
- const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
- while(true){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
-  while((i=buf.indexOf('\n\n'))>=0){const ch=buf.slice(0,i);buf=buf.slice(i+2);if(ch.startsWith('data: '))handle(JSON.parse(ch.slice(6)))}}
- while(busy)await new Promise(r=>setTimeout(r,100));
- $('go').disabled=false;fileData=null;$('fname').textContent='';refresh()}
-function stage(s,d,t){const el=$('s-'+s);if(!el)return;el.classList.add('on');if(d)$('d-'+s).textContent=d;$('t-'+s).textContent=t+'s'}
-const Q=[];let busy=false;
-function handle(e){Q.push(e);if(!busy)pump()}
-async function pump(){busy=true;while(Q.length){const e=Q.shift();handle2(e);if(e.kind!=='end'&&e.stage!=='intake')await new Promise(r=>setTimeout(r,550))}busy=false}
-function handle2(e){
- if(e.kind==='stage')stage(e.stage,e.detail,e.t);
- else if(e.kind==='heal')log('heal','Healed: '+e.detail,e.t);
- else if(e.kind==='learned')log('learned','Applied lesson: '+e.detail,e.t);
- else if(e.kind==='error')log('err','Error: '+e.detail,e.t);
- else if(e.kind==='result')showResult(e);
- else if(e.kind==='end')$('clock').textContent='total '+e.t+'s'}
-function log(c,t,s){const l=$('log');const d=document.createElement('div');d.className='ev '+(c==='heal'?'':c);d.textContent=t+'  ('+s+'s)';l.appendChild(d)}
-function showResult(e){const r=e.result;stage('result',r.status,e.t);
- if(r.status==='NO_ORDER'){$('res').className='';$('res').innerHTML='<div>'+e.text.replace(/\n/g,'<br>')+'</div>';return}
- const ok=r.status==='OK';$('res').className='';
- $('res').innerHTML=`<div class="big" style="color:${ok?'var(--ok)':'var(--warn)'}">${r.status}</div>`+(r.tracking_id?`<div class="ship"><b>${r.tracking_id}</b><br>${r.shipped} x ${r.sku} from ${r.godown}<br>via ${r.carrier}</div>`:`<div class="empty">${r.reason||''}</div>`);
- const n=(r.healed||[]).length+(r.learned||[]).length;
- $('metrics').innerHTML=`<div>LLM calls<br><b style="color:var(--tx);font-size:16px">${r.llm_calls}</b></div><div>Fixes<br><b style="color:var(--tx);font-size:16px">${(r.healed||[]).length}</b></div><div>Lessons applied<br><b style="color:var(--learn);font-size:16px">${(r.learned||[]).length}</b></div>`}
+  const body={text:$('txt').value,chaos:$('chaos').checked,...(fileData?{file_b64:fileData.b64,mime:fileData.mime}:{})};
+  const r=await fetch('/api/order',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});
+  const rd=r.body.getReader(),dec=new TextDecoder();let buf='';
+  while(true){const {done,value}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});let i;
+    while((i=buf.indexOf('\n\n'))>=0){const c=buf.slice(0,i);buf=buf.slice(i+2);if(c.startsWith('data: ')){Q.push(JSON.parse(c.slice(6)));if(!busy)pump()}}}
+  while(busy)await new Promise(r=>setTimeout(r,80));
+  $('go').disabled=false;fileData=null;$('fname').textContent='';refresh()}
+async function pump(){busy=true;while(Q.length){const e=Q.shift();handle(e);if(e.kind!=='end'&&e.stage!=='intake')await new Promise(r=>setTimeout(r,650))}busy=false}
+
+function step(s,d,t){document.querySelectorAll('.step').forEach(x=>x.classList.remove('cur'));const el=$('s-'+s);if(!el)return;el.classList.add('on','cur');if(d)$('d-'+s).textContent=d;$('t-'+s).textContent=t+'s'}
+function logEv(kind,label,text,t){const l=$('log');if(l.querySelector('.empty'))l.innerHTML='';const d=document.createElement('div');d.className='ev '+kind;d.innerHTML=`<b>${label}</b><span></span>`;d.lastChild.textContent=text+'  ('+t+'s)';l.appendChild(d)}
+function handle(e){
+  if(e.kind==='stage'){
+    if(e.stage==='intake'){let t=e.detail;try{const o=JSON.parse(t);t=`${o.qty} x ${o.sku} for ${o.customer}, to ${o.destination}`}catch(_){ }try{D.order=JSON.parse(e.detail)}catch(_){ }step('intake',t,e.t);renderDetails()}
+    else if(e.stage==='godown'){step('godown',e.detail,e.t);src=e.primary;for(const [g,q] of Object.entries(e.stocks||{}))if(q<(e.need||1))oos[g]=true;oos[src]=false;drawMap()}
+    else if(e.stage==='packroute'){step('packroute',e.detail,e.t);route=e.geo;D.box=e.box;D.route=e.route;drawMap();renderDetails();loadGmap(e.geo)}
+    else if(e.stage==='carrier'){step('carrier',e.detail,e.t);D.quotes=e.quotes;D.chosen=e.chosen;renderDetails()}
+  }
+  else if(e.kind==='heal')logEv('heal','FIXED',e.detail,e.t);
+  else if(e.kind==='learned')logEv('learned','REMEMBERED',e.detail,e.t);
+  else if(e.kind==='error')logEv('heal','ERROR',e.detail,e.t);
+  else if(e.kind==='result')showResult(e);
+  else if(e.kind==='end'){lastTotal=e.t;$('st-time').textContent=e.t.toFixed(1)}}
+function smsText(t){const m=(t||'').split(' | ').pop();return m&&m.startsWith('Hi ')?`<div class="sms"><small>Text sent to customer</small>${esc(m)}</div>`:''}
+function showResult(e){const r=e.result;step('result',r.status,e.t);
+  if(r.status==='NO_ORDER'){$('res').className='';$('res').textContent=e.text;return}
+  const ok=r.status==='OK';
+  $('res').className='label '+(ok?'ok':'part');
+  $('res').innerHTML=`<div class="status">${ok?'Dispatched':r.status==='PARTIAL'?'Partly shipped':'Not shipped'}</div>`+
+   (r.tracking_id?`<div class="barcode"></div><div class="trk">${r.tracking_id}</div><div class="kv"><span>Item</span><b>${r.shipped} x ${r.sku}</b><span>From</span><b>${(GD[r.godown]||{}).n||r.godown}</b><span>To</span><b>${r.destination}</b><span>Carrier</span><b>${r.carrier}</b></div>${smsText(e.text)}<div class="row"><button class="btn" onclick="startTrack('${r.tracking_id}')">Track this shipment</button></div>`:`<div class="empty">${r.reason||''}</div>`);
+  $('meter').innerHTML=`<div>language-model calls<b>${r.llm_calls}</b></div><div>problems fixed<b>${(r.healed||[]).length}</b></div><div class="v">lessons used<b>${(r.learned||[]).length}</b></div>`}
+
 async function refresh(){const s=await (await fetch('/api/state')).json();
- const skus=[...new Set(s.stock.map(x=>x.sku))],gds=[...new Set(s.stock.map(x=>x.godown))];
- $('stock').innerHTML=s.stock.length?'<table><tr><th>SKU</th>'+gds.map(g=>`<th>${g.replace('GD-','')}</th>`).join('')+'</tr>'+skus.map(k=>'<tr><td>'+k+'</td>'+gds.map(g=>{const q=(s.stock.find(x=>x.sku===k&&x.godown===g)||{}).qty;return `<td class="${q<5?'low':''}">${q}</td>`}).join('')+'</tr>').join('')+'</table>':'<div class="empty">Stock appears after the first order.</div>';
- $('lessons').innerHTML=s.lessons.length?s.lessons.slice().reverse().map(l=>`<div class="lesson"><b>${l.stage}</b> ${l.problem}<br>&rarr; ${l.fix}</div>`).join(''):'<div class="empty">No lessons yet.</div>'}
-async function reset(){await fetch('/api/reset',{method:'POST'});resetUI();$('res').textContent='Reset. Warehouse and memory cleared.';refresh()}
+  renderBiz(s.finance);$('st-ship').textContent=s.dispatched;$('recent').innerHTML=s.shipments.slice(0,4).map(x=>`<button class="chip" data-trk="${x.tracking_id}">${x.tracking_id}</button>`).join('')||'<span class="hint">Shipments appear here after dispatch.</span>';document.querySelectorAll('[data-trk]').forEach(b=>b.onclick=()=>{$('tid').value=b.dataset.trk;startTrack(b.dataset.trk)});$('st-les').textContent=s.lesson_count;
+  const skus=[...new Set(s.stock.map(x=>x.sku))],gds=['GD-BLR','GD-CHN','GD-HYD'];
+  $('stock').innerHTML=s.stock.length?skus.map(k=>`<div class="sku"><b>${k}</b><div class="bars">`+gds.map(g=>{const q=(s.stock.find(x=>x.sku===k&&x.godown===g)||{}).qty||0;
+    return `<div class="bar ${q===0?'z':''}"><i style="width:${Math.min(100,q/3)}%"></i><span>${q}</span></div>`}).join('')+`</div></div>`).join(''):'<div class="empty">Stock appears after the first order.</div>';
+  $('lessons').innerHTML=s.lessons.length?s.lessons.slice().reverse().map(l=>`<div class="lesson"><b>${l.stage}</b>${esc(l.problem)}<br><em>${esc(l.fix)}</em></div>`).join(''):'<div class="empty">Nothing learned yet. Fixes appear here and get reused.</div>'}
+function stopTrack(){clearInterval(trkTimer);trkTimer=null;truck=null;$('trackbox').hidden=true}
+async function startTrack(id){id=(id||'').trim().toUpperCase();if(!id)return;clearInterval(trkTimer);
+  const tick=async()=>{const r=await fetch('/api/track/'+encodeURIComponent(id));
+    if(!r.ok){$('trackbox').hidden=false;$('trk-id').textContent=id;$('trk-eta').textContent='No shipment with that tracking ID.';$('trk-tl').innerHTML='';clearInterval(trkTimer);return}
+    const t=await r.json(),s=t.shipment;$('trackbox').hidden=false;$('trk-id').textContent=s.tracking_id;
+    $('trk-eta').textContent=t.delivered?'Delivered to '+s.destination:`${t.remaining_hours} h to ${s.destination} (${s.carrier})`;
+    $('trk-tl').innerHTML=t.steps.map(x=>`<li class="${x.done?'d':''}"><i></i><span>${esc(x.label)}</span></li>`).join('');
+    route={from:t.from,to:t.to};truck=t.position;src=s.godown;drawMap();if(t.delivered)clearInterval(trkTimer)};
+  await tick();trkTimer=setInterval(tick,1500)}
+$('trackgo').onclick=()=>startTrack($('tid').value);
+$('tid').onkeydown=e=>{if(e.key==='Enter')startTrack($('tid').value)};
+const inr=n=>'Rs '+Math.round(n).toLocaleString('en-IN');
+function renderBiz(f){if(!f||!f.orders){$('kpis').innerHTML='<div class="empty">Revenue, costs and margin appear after the first dispatch.</div>';$('bizsplit').innerHTML='';$('bysku').innerHTML='';return}
+  const pct=f.revenue?(f.margin/f.revenue*100).toFixed(1):0;
+  $('kpis').innerHTML=`<div class="kpi"><small>Orders / units sold</small><b>${f.orders} / ${f.units}</b></div><div class="kpi"><small>Revenue</small><b>${inr(f.revenue)}</b></div><div class="kpi"><small>Product cost</small><b>${inr(f.product_cost)}</b></div><div class="kpi"><small>Shipping + packaging</small><b>${inr(f.shipping+f.packaging)}</b></div><div class="kpi ${f.margin<0?'neg':'m'}"><small>Profit (${pct}%)</small><b>${inr(f.margin)}</b></div><div class="kpi"><small>Shipping per order</small><b>${inr((f.shipping+f.packaging)/f.orders)}</b></div>`;
+  const tot=Math.max(f.revenue,1),w=x=>Math.max(0,x/tot*100);
+  $('bizsplit').innerHTML=`<div class="split"><i style="width:${w(f.product_cost)}%;background:var(--ink)"></i><i style="width:${w(f.shipping)}%;background:var(--yellow)"></i><i style="width:${w(f.packaging)}%;background:var(--violet)"></i><i style="width:${w(Math.max(f.margin,0))}%;background:var(--teal)"></i></div><div class="sk"><span><i style="background:var(--ink)"></i>product</span><span><i style="background:var(--yellow)"></i>carrier</span><span><i style="background:var(--violet)"></i>packaging</span><span><i style="background:var(--teal)"></i>profit</span></div>`;
+  const mx=Math.max(...Object.values(f.by_sku).map(x=>x.revenue),1);
+  $('bysku').innerHTML='<div style="margin-top:10px;font-size:12px;color:var(--mute)">Products sold</div>'+Object.entries(f.by_sku).map(([k,v])=>`<div class="unit"><b>${k}</b><div class="qbar"><i style="width:${v.revenue/mx*100}%;background:var(--teal)"></i></div><span>${v.units} units</span></div>`).join('')}
+const esc=t=>String(t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 refresh();
-</script></body></html>
+</script>
+</body>
+</html>

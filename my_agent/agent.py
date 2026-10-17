@@ -121,6 +121,7 @@ class FulfilmentEngine(BaseAgent):
         trace, healed, llm_calls = [], [], 1  # intake counts as 1
         res = {"status": "FAILED", "healed": healed, "llm_calls": 1}
         env = {k: state[k] for k in ("WAREHOUSE_DB", "LESSONS_FILE", "FLAKY_CARRIER") if state.get(k)}
+        env |= {k: os.environ[k] for k in ("GOOGLE_MAPS_API_KEY", "USE_REAL_MAPS") if os.environ.get(k)}
         try:
             sku, qty, dest = order["sku"], int(order["qty"]), order["destination"]
         except Exception:
@@ -221,7 +222,8 @@ class FulfilmentEngine(BaseAgent):
             shipped = qty - need
             primary = picks[0][0]
             trace.append(f"godown {primary} reserved {shipped}/{qty} ({time.time() - t0:.1f}s)")
-            yield self._prog("godown", f"{primary} reserved {shipped}/{qty} x {sku} for {dest}")
+            yield self._prog("godown", f"{primary} reserved {shipped}/{qty} x {sku} for {dest}", primary=primary,
+                             stocks={g["godown"]: g["available"] for g in ranked}, need=qty)
             for ev in flush():
                 yield ev
 
@@ -232,7 +234,9 @@ class FulfilmentEngine(BaseAgent):
                 yield self._done(res | {"reason": route["error"], "llm_calls": llm_calls}, f"AUDIT FAILED: {route['error']}")
                 return
             trace.append(f"box {box['box']} x{box['boxes']} | route {route['distance_km']}km ({time.time() - t0:.1f}s)")
-            yield self._prog("packroute", f"box {box['box']} x{box['boxes']} ({box['total_weight_kg']}kg) | route {route['distance_km']}km, ~{route['drive_hours']}h drive")
+            yield self._prog("packroute", f"box {box['box']} x{box['boxes']} ({box['total_weight_kg']}kg) | route {route['distance_km']}km, ~{route['drive_hours']}h drive",
+                             geo={"from": route.get("from"), "to": route.get("to"), "godown": primary, "poly": route.get("polyline")},
+                             box=box, route={k: route.get(k) for k in ("distance_km", "drive_hours", "source")})
 
             # 3. CARRIERS in parallel; heal by retry, then exclude ----------------------
             async def quote(c):
@@ -262,14 +266,16 @@ class FulfilmentEngine(BaseAgent):
             best = min(quotes, key=lambda q: (q["eta_hours"], q["price"]))  # speed first
             trace.append(f"carrier {best['carrier']} {best['eta_hours']}h from {len(quotes)} quotes ({time.time() - t0:.1f}s)")
             yield self._prog("carrier", f"{best['carrier']} chosen: {best['eta_hours']}h, Rs {best['price']} (from {len(quotes)} quotes: "
-                             + ", ".join(f"{q['carrier']} {q['eta_hours']}h" for q in quotes) + ")")
+                             + ", ".join(f"{q['carrier']} {q['eta_hours']}h" for q in quotes) + ")",
+                             quotes=quotes, chosen=best["carrier"])
             for ev in flush():
                 yield ev
 
             # 4. DISPATCH ------------------------------------------------------------------
             ship = await call("create_shipment", order_id=order["order_id"], customer=order["customer"],
                               destination=dest, godown=primary, sku=sku, qty=shipped, box=box["box"],
-                              carrier=best["carrier"], price=best["price"], eta_hours=best["eta_hours"])
+                              carrier=best["carrier"], price=best["price"], eta_hours=best["eta_hours"],
+                              box_cost=box.get("box_cost", 0))
 
         status = "OK" if ship.get("tracking_id") and need == 0 else f"PARTIAL (backorder {need})"
         heal_txt = ("Self-healed: " + "; ".join(healed) if healed else "Clean run") + \
@@ -281,10 +287,10 @@ class FulfilmentEngine(BaseAgent):
                          + "\n".join("  - " + t for t in trace)
                          + f"\n{heal_txt}\nTracking {ship.get('tracking_id')} | {ship.get('notification', '')}")
 
-    def _prog(self, stage, detail, kind="stage"):
+    def _prog(self, stage, detail, kind="stage", **extra):
         """Progress event (consumed live by the dashboard via custom_metadata; readable in ADK UI too)."""
         return Event(author=self.name, content=types.Content(role="model", parts=[types.Part(text=f"[{stage}] {detail}")]),
-                     custom_metadata={"kind": kind, "stage": stage, "detail": detail, "t": round(time.time(), 2)})
+                     custom_metadata={"kind": kind, "stage": stage, "detail": detail, "t": round(time.time(), 2), **extra})
 
     def _done(self, result, text):
         return Event(author=self.name, content=types.Content(role="model", parts=[types.Part(text=text)]),

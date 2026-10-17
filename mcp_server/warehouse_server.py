@@ -38,6 +38,9 @@ SKUS = {  # sku -> (name, weight_kg, volume_l)
     "LAPTOP-15": ("15in Laptop", 2.2, 6.0), "MOUSE-WL": ("Wireless Mouse", 0.15, 0.3),
     "KEYBOARD-MX": ("Mechanical Keyboard", 0.9, 3.0), "MONITOR-24": ("24in Monitor", 4.5, 28.0),
 }
+PRICES = {  # sku -> (selling price, unit cost) in INR
+    "LAPTOP-15": (52000, 41000), "MOUSE-WL": (900, 520), "KEYBOARD-MX": (4200, 2800), "MONITOR-24": (11500, 8400),
+}
 BOXES = [  # id, max_kg, volume_l, cost
     ("BOX-S", 2, 5, 15), ("BOX-M", 8, 30, 40), ("BOX-L", 20, 80, 90), ("BOX-XL", 40, 200, 160),
 ]
@@ -146,15 +149,41 @@ def select_box(sku: str, qty: int) -> dict:
             "box_cost": big[3] * n, "note": "order split across multiple boxes"}
 
 
+def _routes_api(origin, dest):
+    """Google Routes API: real driving distance, duration and polyline. Returns None on any failure."""
+    key = os.environ.get("GOOGLE_MAPS_API_KEY")
+    if os.environ.get("USE_REAL_MAPS") != "1" or not key:
+        return None
+    try:
+        body = {"origin": {"location": {"latLng": {"latitude": origin[0], "longitude": origin[1]}}},
+                "destination": {"location": {"latLng": {"latitude": dest[0], "longitude": dest[1]}}},
+                "travelMode": "DRIVE"}
+        req = urllib.request.Request(
+            "https://routes.googleapis.com/directions/v2:computeRoutes", data=json.dumps(body).encode(),
+            headers={"Content-Type": "application/json", "X-Goog-Api-Key": key,
+                     "X-Goog-FieldMask": "routes.distanceMeters,routes.duration,routes.polyline.encodedPolyline"})
+        with urllib.request.urlopen(req, timeout=5) as r:
+            rt = json.load(r)["routes"][0]
+        return {"km": round(rt["distanceMeters"] / 1000, 1), "hours": round(int(rt["duration"].rstrip("s")) / 3600, 1),
+                "polyline": rt["polyline"]["encodedPolyline"]}
+    except Exception:
+        return None  # self-heal: fall back to offline estimate
+
+
 @mcp.tool()
 def get_route(godown: str, destination: str) -> dict:
-    """Distance (km) and drive ETA from a godown to the destination (Google Maps if enabled, else offline)."""
+    """Distance (km), drive ETA and path from a godown to the destination (Google Routes API if enabled, else offline)."""
     dest, src = _geocode(destination)
     if dest is None:
         return {"error": f"could not geocode '{destination}'", "hint": "use the city name only"}
     g = GODOWNS[godown]
+    real = _routes_api((g[1], g[2]), dest)
+    if real:
+        return {"distance_km": real["km"], "drive_hours": real["hours"], "source": src + "+routes-api",
+                "from": [g[1], g[2]], "to": list(dest), "polyline": real["polyline"]}
     km = round(_hav((g[1], g[2]), dest) * 1.25, 1)  # road factor
-    return {"distance_km": km, "drive_hours": round(km / 55, 1), "source": src}
+    return {"distance_km": km, "drive_hours": round(km / 55, 1), "source": src + "+offline",
+            "from": [g[1], g[2]], "to": list(dest)}
 
 
 @mcp.tool()
@@ -176,11 +205,13 @@ def get_carrier_quote(carrier: str, distance_km: float, weight_kg: float) -> dic
 
 @mcp.tool()
 def create_shipment(order_id: str, customer: str, destination: str, godown: str, sku: str, qty: int,
-                    box: str, carrier: str, price: float, eta_hours: float) -> dict:
+                    box: str, carrier: str, price: float, eta_hours: float, box_cost: float = 0.0) -> dict:
     """Create the shipment record, generate tracking ID and customer notification text."""
     tid = "TRK" + uuid.uuid4().hex[:8].upper()
     data = dict(tracking_id=tid, order_id=order_id, customer=customer, destination=destination, godown=godown,
                 sku=sku, qty=qty, box=box, carrier=carrier, price=price, eta_hours=eta_hours, status="DISPATCHED")
+    sell, cost = PRICES.get(sku, (0, 0))
+    data.update(revenue=sell * qty, product_cost=cost * qty, shipping_cost=round(price, 2), packaging_cost=box_cost)
     c = db()
     c.execute("INSERT INTO shipments VALUES(?,?,?)", (tid, json.dumps(data), time.time()))
     c.commit()
