@@ -37,7 +37,9 @@ The **Judge agent** checks every claim in a reply (tracking IDs, order IDs, prod
 | `2 iPhones to Mumbai` | "We don't stock that", plus the products we do stock |
 | `2 mice to Madurai for Ravi` | Dispatched; 6/6 claims verified against tool results |
 
-**Agent evaluation tab:** `agentic_eval_suite.py` runs every scenario against the live pipeline. `eval_suite.py` covers 11 fulfilment behaviours and `security_suite.py` covers 35 adversarial checks.
+![Agent evaluation tab: 14/14 checks passed, each scenario with what we sent and what happened](docs/evaluation.jpg)
+
+**Agent evaluation tab (14/14 checks passed):** `agentic_eval_suite.py` runs every scenario against the live pipeline. `eval_suite.py` covers 11 fulfilment behaviours and `security_suite.py` covers 35 adversarial checks.
 
 ## 3. A2A orchestration
 

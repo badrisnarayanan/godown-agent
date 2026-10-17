@@ -410,7 +410,7 @@ body[data-view="eval"] #live{display:none}
 </section>
 
 <section id="v-eval" class="wide">
-  <div class="viewhead"><h2>Agent evaluation</h2><p>Automated checks for what matters most: personal data never reaches a model, agents cooperate over A2A, every answer is grounded in real data, and it stays fast and cheap. Run with <code>python agentic_eval_suite.py</code>; an independent model also grades each answer.</p></div>
+  <div class="viewhead"><h2>Agent evaluation</h2><p>Automated checks for what matters most: personal data never reaches a model, agents cooperate over A2A, every answer is grounded in real data, and it stays fast and cheap. Each check runs a real request through the full pipeline and verifies the outcome. Run with <code>python agentic_eval_suite.py</code>.</p></div>
   <div id="evalbox" class="empty">Loading results...</div>
 </section>
 
@@ -653,7 +653,7 @@ function onEnd(e){const tin=e.tokens?e.tokens.in:0,tout=e.tokens?e.tokens.out:0,
   setAgent('orchestrator','done','All steps finished in '+e.t.toFixed(1)+' s')}
 async function loadEval(){try{const r=await (await fetch('/api/eval-results')).json();if(!r.sections||!r.sections.length){$('evalbox').textContent='No results yet. Run python agentic_eval_suite.py';return}
   const tot=r.sections.reduce((a,s)=>a+s.cases.length,0),pass=r.sections.reduce((a,s)=>a+s.cases.filter(c=>c.pass).length,0);
-  $('evalbox').className='';$('evalbox').innerHTML=`<div class="evtiles"><div><b>${pass}/${tot}</b>checks passed</div>`+(r.judge_avg?`<div><b>${r.judge_avg.groundedness}/5</b>groundedness (independent model)</div><div><b>${r.judge_avg.truthfulness}/5</b>truthfulness</div><div><b>${r.judge_avg.hallucinations}</b>hallucinations found</div>`:'')+(r.perf?`<div><b>${r.perf.median_s} s</b>median end to end</div><div><b>${r.perf.avg_tokens}</b>avg tokens per order</div>`:'')+`<div><b>${esc(r.generated||'')}</b>last run</div></div>`+
+  $('evalbox').className='';$('evalbox').innerHTML=`<div class="evtiles"><div><b>${pass}/${tot}</b>checks passed</div>`+(r.judge_avg?`<div><b>${r.judge_avg.groundedness}/5</b>groundedness</div><div><b>${r.judge_avg.truthfulness}/5</b>truthfulness</div><div><b>${r.judge_avg.hallucinations}</b>hallucinations found</div>`:'')+(r.perf?`<div><b>${r.perf.median_s} s</b>median end to end</div><div><b>${r.perf.avg_tokens}</b>avg tokens per order</div>`:'')+`<div><b>${esc(r.generated||'')}</b>last run</div></div>`+
    r.sections.slice().sort((a,b)=>(/Truth/.test(b.title)?1:0)-(/Truth/.test(a.title)?1:0)).map(s=>`<div class="evsec"><h3>${esc(s.title)}</h3><div class="hint">${esc(s.what||'')}</div><div class="evrow h"><span>Check</span><span>What we sent</span><span>What happened</span><span>Result</span></div>`+
    s.cases.map(c=>`<div class="evrow"><span><b>${esc(c.name)}</b>${c.judge?`<br><small>judge: grounded ${c.judge.groundedness}/5, truthful ${c.judge.truthfulness}/5</small>`:''}</span><span>${esc(c.input||'')}</span><span>${esc(c.observed||'')}</span><span class="${c.pass?'pass':'fail'}">${c.pass?'PASS':'FAIL'}</span></div>`).join('')+`</div>`).join('')}catch(_){$('evalbox').textContent='Could not load results.'}}
 const esc=t=>String(t).replace(/[&<>]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
