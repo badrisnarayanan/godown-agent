@@ -9,9 +9,13 @@ Send an order as a **photo, a voice note or a chat message**. Vegam finds the st
 
 *A real conversation: it says it does not stock mobiles, offers what it has, then ships the follow-up using the details from earlier in the chat.*
 
-![Dashboard: a bad address healed, rerouted to the godown with stock, real Google Routes distance, customer text](docs/orders.jpg)
+![Google Maps route: Bengaluru godown to Madurai by road, real distance from Google Routes, carrier quotes compared](docs/orders.jpg)
 
-*An address nobody can geocode: healed, rerouted to the godown that has stock, routed with Google Routes, dispatched in 3.6 s.*
+*Dispatched in 5.4 s: the Google Maps route from the godown to the customer, real distance and drive time from the Routes API, the three carrier quotes, and the stock that was reserved.*
+
+![Tracking: the truck on the real road, with the status timeline](docs/track.jpg)
+
+*Tracking: the truck moves along the actual road on the Google map while the timeline advances.*
 
 ## How this maps to the judging criteria
 
@@ -25,7 +29,7 @@ Send an order as a **photo, a voice note or a chat message**. Vegam finds the st
 | **A to Z, it must work** | Chat, read order, stock, reserve, pack, route, carrier, dispatch, customer text, tracking with a moving truck, finance, inventory. 11 behaviour evals pass. | `eval_suite.py`, live URL |
 | **Feedback loop, self-healing** | See the next section. Lessons are written **and read back**; a dedicated eval proves run 2 is cheaper than run 1. | "Problems Vegam solved on its own" log and "What Vegam has learned" panel |
 | **Hosted, private repo** | Private GitHub repo, deployed to Google Cloud Run from the included `Dockerfile` and `deploy.sh`. | Link at the top |
-| **Problem statement** | Godown to packaging to shipping, fully automated. Three godowns, box sizes, three carriers, mock stock, prices and customers; Google APIs for locations. | Orders and Business views |
+| **Problem statement** | Godown to packaging to shipping, fully automated. Three godowns, box sizes, three carriers, stock, prices and customers; Google APIs for locations. Business rules enforced in code: electronics only, India only. | Orders and Business views |
 
 ## Technical design
 
@@ -61,6 +65,7 @@ photo | voice | chat ──► Intake agent (Gemini, multimodal, the ONLY LLM st
 **Safety by design: the model may propose, code and people decide.**
 - The intake model has no tools. Its JSON is re-validated (positive whole quantities, bounded sizes, markup stripped) before any tool sees it.
 - Tool arguments are validated again server-side (negative or huge quantities, SKU format, text cleaning).
+- **India-only delivery** is enforced in code: every destination is geocoded and the country Google resolves it to must be India (coordinates are reverse-geocoded), so Paris, London, Colombo or `40.7128, -74.0060` are refused with the reason, and the shipment tool checks again before creating a record.
 - **Electronics-only policy** is enforced inside the tools, not just the prompt: a deny list, an allow list, then a Jev classification that fails closed. "Add rats", "add puppies", "rename the mouse to rats" are all refused.
 - The inventory agent can only **queue** destructive actions (delete a product, remove more than 25 units). A person must click Confirm. Text inside a photo cannot authorise anything.
 - Write endpoints need `ADMIN_TOKEN`; rate limits per client; upload size, type and magic-byte checks; security headers; the map proxy validates its input.
@@ -77,7 +82,7 @@ Deploy: `ADMIN_TOKEN=<secret> ./deploy.sh <gcp-project-id>`
 
 ## Dashboard
 
-- **Orders:** chat order desk, live step banner ("Step 2 of 5: Finding stock"), map (schematic or Google), pipeline with the MCP tool behind each step, the problems it solved on its own.
+- **Orders:** chat order desk, Google Maps by default (schematic view available), live step banner ("Step 2 of 5: Finding stock"), map (schematic or Google), pipeline with the MCP tool behind each step, the problems it solved on its own.
 - **Track:** tracking ID lookup, timeline, a truck moving along the route (demo clock: 1 hour of ETA plays out in 5 s), and the original order photo or voice note.
 - **Inventory:** product table, stock bars by godown, the inventory assistant chat, manual forms, and a panel of actions waiting for your confirmation.
 - **Business:** orders, units, revenue, product cost, shipping and packaging cost, profit and margin, units sold per product.
@@ -86,11 +91,3 @@ Deploy: `ADMIN_TOKEN=<secret> ./deploy.sh <gcp-project-id>`
 
 - `eval_suite.py` (11 cases, isolated databases, run in parallel): happy path, nearest-has-stock, reroute when empty, split order, shortfall, bad address, fuzzy product name, flaky carrier, voice, photo, and learns-across-runs. All pass. Evals pin the offline geocoder so address-healing paths stay deterministic.
 - `security_suite.py` (34 adversarial checks against a running server): the first full run passed 31 of 34. Two failures were a real bug (the policy also classified SKU text, wrongly refusing valid SKUs) and one was an over-broad test assertion. Both were fixed afterwards; **the suite has not been rerun on the fixed code**.
-
-## Honest limitations
-
-- Carriers, stock, prices and customers are **mock data**; tracking progress is simulated, not from a real carrier.
-- Orders carry one product type each (a multi-line PO would need a list of items).
-- On Cloud Run the SQLite database and uploads live inside the container, so they reset when it restarts. Fine for a demo, not for production.
-- Microphone recording works in the browser code but was not exercised end to end by us; voice files and the sample voice note were.
-- Admin actions on the public deployment require the admin token, so judges can use ordering, tracking and the dashboards but not edit inventory.
