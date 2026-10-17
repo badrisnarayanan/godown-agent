@@ -43,15 +43,19 @@ def limit(bucket: str, per_minute: int):
         q, now = _hits[(bucket, client_ip(req))], time.time()
         while q and now - q[0] > 60:
             q.popleft()
-        if len(q) >= per_minute:
+        g = _hits[(bucket, "*")]  # global cap across all clients, so rotating IPs cannot run up LLM or Maps cost
+        while g and now - g[0] > 60:
+            g.popleft()
+        if len(q) >= per_minute or len(g) >= per_minute * 6:
             raise HTTPException(429, f"Too many requests. Limit is {per_minute} per minute.")
         q.append(now)
+        g.append(now)
     return dep
 
 
 def is_admin(req: Request):
     tok = os.environ.get("ADMIN_TOKEN")
-    return (not tok) or hmac.compare_digest(req.headers.get("x-admin-token", ""), tok)
+    return (not tok) or hmac.compare_digest(req.headers.get("x-admin-token", "").encode("utf-8", "ignore"), tok.encode())
 
 
 def admin(req: Request):
@@ -128,7 +132,10 @@ def state(req: Request):
         stock = [dict(godown=g, sku=s, qty=q) for g, s, q in c.execute("SELECT godown,sku,qty FROM stock WHERE sku IN (SELECT sku FROM catalog) ORDER BY sku,godown")]
         ships = [json.loads(d) for (d,) in c.execute("SELECT data FROM shipments ORDER BY created DESC LIMIT 5")]
         c.close()
-    lessons = json.loads(LESSONS.read_text()) if LESSONS.exists() else []
+    try:
+        lessons = json.loads(LESSONS.read_text()) if LESSONS.exists() else []
+    except Exception:
+        lessons = []
     allx = []
     if DB.exists():
         c = sqlite3.connect(DB)
@@ -144,6 +151,7 @@ def state(req: Request):
     fin["margin"] = fin["revenue"] - fin["product_cost"] - fin["shipping"] - fin["packaging"]
     if not is_admin(req):  # public viewers get tracking IDs only, no customer names or addresses
         ships = [{"tracking_id": x["tracking_id"]} for x in ships]
+        lessons = [{**l, "problem": re.sub(r"'[^']*'", "'...'", l["problem"]), "fix": re.sub(r"'[^']*'", "'...'", l["fix"])} for l in lessons]
     return {"stock": stock, "lessons": lessons[-12:], "shipments": ships, "dispatched": len(allx), "lesson_count": len(lessons), "finance": fin}
 
 
@@ -248,7 +256,7 @@ DEMO_SECONDS_PER_HOUR = 5  # demo clock: 1 hour of ETA plays out in 5 seconds
 
 
 @app.get("/api/track/{tid}", dependencies=[Depends(limit("track", 60))])
-def track(tid: str):
+def track(tid: str, req: Request):
     if not DB.exists():
         return JSONResponse({"error": "unknown tracking id"}, status_code=404)
     c = sqlite3.connect(DB)
@@ -271,7 +279,7 @@ def track(tid: str):
     steps = [("Order received", 0), (f"Packed at {gname}", 0.08), ("Picked up by " + d["carrier"], 0.2),
              ("In transit", 0.35), ("Out for delivery", 0.9), ("Delivered", 1.0)]
     idx = json.loads(INDEX.read_text()) if INDEX.exists() else {}
-    return {"source": idx.get(d["tracking_id"]), "shipment": d, "progress": round(frac, 3), "remaining_hours": round(d["eta_hours"] * (1 - frac), 1),
+    return {"source": idx.get(d["tracking_id"]), "shipment": (d if is_admin(req) else {k: v for k, v in d.items() if k != "customer"}), "progress": round(frac, 3), "remaining_hours": round(d["eta_hours"] * (1 - frac), 1),
             "delivered": frac >= 1, "from": [glat, glon], "to": list(dest),
             "position": on_road or [glat + (dest[0] - glat) * move, glon + (dest[1] - glon) * move], "poly": poly,
             "steps": [{"label": l, "done": frac >= t} for l, t in steps]}

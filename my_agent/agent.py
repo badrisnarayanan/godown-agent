@@ -177,7 +177,11 @@ async def heal(kind, context, catalog=None):
         if kind == "geocode_failed":
             a = await asyncio.to_thread(_jev_sync, state, {"city": {
                 "type": "choice", "instructions": "Which city is the delivery address in or nearest to?",
-                "criteria": {c: f"Address is in or near {c}" for c in CITIES}}})
+                "criteria": {c: f"Address is in or near {c}" for c in CITIES}},
+                "country": {"type": "choice", "instructions": "Is this delivery address in India?",
+                            "criteria": {"india": "The address is in India", "abroad": "The address is in another country, or it is unclear"}}})
+            if a["country"]["choice"] != "india" or a["country"]["confidence"] < 0.7:
+                return {"action": "outside_india", "via": "jev"}
             if a["city"]["confidence"] >= JEV_MIN_CONF:
                 return {"action": "fix_address", "city": a["city"]["choice"], "via": "jev"}
         elif kind in ("unknown_sku", "stock_shortfall"):
@@ -200,7 +204,7 @@ async def heal(kind, context, catalog=None):
     prompt = (
         f"You are the exception-healer of a logistics system. Failure: {kind}. Context: {json.dumps(context)}\n"
         f"Valid SKUs: {json.dumps(catalog or read_catalog(''))}. Reply ONLY JSON, one of: "
-        '{"action":"fix_address","city":"<city>"} | {"action":"substitute","sku":"<valid sku>","reason":"..."} | '
+        '{"action":"fix_address","city":"<city>"} (ONLY if the address is certainly in India, otherwise {"action":"outside_india"}) | {"action":"substitute","sku":"<valid sku>","reason":"..."} | '
         '{"action":"backorder","reason":"..."} | {"action":"escalate","reason":"..."}')
     d = await _gemini_json(prompt)
     d["via"] = "gemini-fallback"
@@ -267,6 +271,11 @@ class FulfilmentEngine(BaseAgent):
                 sent["h"], sent["l"] = len(healed), len(learned)
                 return evs
 
+            async def undo():
+                """Put reserved stock back if a later step fails, so failures never leak inventory."""
+                for g, q in picks:
+                    await call("restock", godown=g, sku=sku, qty=q)
+
             async def lesson(stage, problem, fix):
                 healed.append(fix)
                 await call("save_lesson", stage=stage, problem=problem, fix=fix)
@@ -280,9 +289,21 @@ class FulfilmentEngine(BaseAgent):
                     await lesson("godown", f"unknown sku {sku}", f"healer({d.get('via')}) substituted {d['sku']} ({d.get('reason')})")
                     sku = d["sku"]
                     stock = await call("check_stock", sku=sku, qty=qty, destination=dest)
+            if stock.get("policy") == "india_only":
+                yield self._done(res | {"status": "REFUSED", "reason": stock["error"], "llm_calls": llm_calls}, stock["error"])
+                return
             if "error" in stock and "geocode" in stock["error"]:
+                if os.environ.get("USE_REAL_MAPS") == "1" and os.environ.get("GOOGLE_MAPS_API_KEY"):
+                    # Google could not place it: never guess a city for the customer, ask instead
+                    msg = f"I couldn't find '{dest}' in India. Could you share the city and state, or the pincode?"
+                    yield self._done(res | {"status": "NEEDS_INFO", "question": msg, "options": [], "llm_calls": llm_calls}, msg)
+                    return
                 llm_calls += 1
                 d = await heal("geocode_failed", {"address": dest})
+                if d.get("action") == "outside_india":
+                    msg = f"Vegam only delivers within India, and I could not place '{dest}' in India. If you meant an Indian address, send the city and state."
+                    yield self._done(res | {"status": "REFUSED", "reason": msg, "llm_calls": llm_calls}, msg)
+                    return
                 if d.get("city"):
                     await lesson("godown", f"address '{dest}' failed geocoding", f"healer({d.get('via')}) normalised to '{d['city']}'")
                     dest = d["city"]
@@ -334,6 +355,7 @@ class FulfilmentEngine(BaseAgent):
             box, route = await asyncio.gather(
                 call("select_box", sku=sku, qty=shipped), call("get_route", godown=primary, destination=dest))
             if "error" in route:
+                await undo()
                 yield self._done(res | {"reason": route["error"], "llm_calls": llm_calls}, f"AUDIT FAILED: {route['error']}")
                 return
             trace.append(f"box {box['box']} x{box['boxes']} | route {route['distance_km']}km ({time.time() - t0:.1f}s)")
@@ -361,6 +383,7 @@ class FulfilmentEngine(BaseAgent):
 
             quotes = [q for q in await asyncio.gather(*[quote(c) for c in CARRIERS]) if q]
             if not quotes:
+                await undo()
                 llm_calls += 1
                 d = await heal("all_carriers_down", {"order": order})
                 yield self._done(res | {"reason": "all carriers down", "llm_calls": llm_calls},
@@ -379,6 +402,11 @@ class FulfilmentEngine(BaseAgent):
                               destination=dest, godown=primary, sku=sku, qty=shipped, box=box["box"],
                               carrier=best["carrier"], price=best["price"], eta_hours=best["eta_hours"],
                               box_cost=box.get("box_cost", 0))
+            if "error" in ship or not ship.get("tracking_id"):
+                await undo()
+                yield self._done(res | {"reason": ship.get("error", "could not create the shipment"), "llm_calls": llm_calls},
+                                 f"AUDIT FAILED: {ship.get('error', 'shipment not created')}")
+                return
 
         status = "OK" if ship.get("tracking_id") and need == 0 else f"PARTIAL (backorder {need})"
         heal_txt = ("Self-healed: " + "; ".join(healed) if healed else "Clean run") + \

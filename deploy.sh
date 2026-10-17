@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Usage: ./deploy.sh <gcp-project-id> [region]   (needs: gcloud auth login)
 set -euo pipefail
+: "${ADMIN_TOKEN:?Set ADMIN_TOKEN before deploying a public service}"
 PROJECT="${1:?project id}"; REGION="${2:-asia-south1}"
 set -a; source my_agent/.env; set +a
 gcloud run deploy godown-agent --source . --project "$PROJECT" --region "$REGION" \

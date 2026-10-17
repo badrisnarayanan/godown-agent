@@ -18,6 +18,7 @@ LESSONS = Path(os.environ.get("LESSONS_FILE", ROOT / "lessons.json"))
 FAIL_STATE = Path(DB + ".fail")  # planted-failure bookkeeping (per-DB so evals are isolated)
 
 import threading
+import unicodedata
 _FAIL_LOCK = threading.Lock()
 
 mcp = MCPServer("warehouse")
@@ -77,8 +78,10 @@ def _bad_qty(qty):
 
 
 def _clean(text, n):
-    """Strip control chars and angle brackets, cap length."""
-    return re.sub(r"[\x00-\x1f<>]", "", str(text)).strip()[:n]
+    """Normalise unicode, strip control/invisible characters (zero-width etc.) and angle brackets, cap length."""
+    t = unicodedata.normalize("NFKC", str(text))
+    t = "".join(ch for ch in t if unicodedata.category(ch) not in ("Cc", "Cf"))
+    return re.sub(r"[<>]", "", t).strip()[:n]
 
 
 GODOWNS = {
@@ -138,7 +141,7 @@ def _init():
 _init()
 
 
-BIG_REMOVAL = 25  # removing more units than this needs a human click
+BIG_REMOVAL = 0  # every stock removal needs a human click
 
 
 def _propose(action, args, summary):
@@ -229,6 +232,7 @@ INDIA_POLY = [(74.5, 36.8), (77.5, 35.6), (79, 34.2), (78.8, 32.5), (80.5, 30.5)
               (84.8, 19), (82.3, 16.8), (80.2, 15.5), (80.3, 13.5), (79.8, 11.5), (79.3, 10.3), (78, 8.8), (77.5, 8), (76.5, 9.2),
               (75.5, 12), (74.7, 14.5), (73.5, 16.5), (72.8, 19.2), (72.8, 21), (70.5, 20.8), (69, 22.3), (70.5, 23.3), (68.3, 23.6),
               (68.8, 24.5), (70.3, 25), (70, 27), (72, 28.6), (73.5, 30.5), (74.5, 32), (74, 34)]  # coarse outline, offline fallback only
+_INDIA_WORDS = {"india", "tamil nadu", "karnataka", "telangana", "maharashtra", "delhi", "west bengal", "kerala", "andhra pradesh", "gujarat", "rajasthan"}
 _OUTSIDE = {}  # address -> where it really is, for addresses found outside India
 
 
@@ -278,9 +282,11 @@ def _geocode_uncached(addr: str):
             _OUTSIDE[addr] = where
             return None, "outside-india"
         return ll, "coordinates"
+    google_answered = False
     if os.environ.get("USE_REAL_MAPS") == "1" and os.environ.get("GOOGLE_MAPS_API_KEY"):
         try:
-            data = _gget({"address": addr, "region": "in"})  # bias to India, but read the country it REALLY resolves to
+            data = _gget({"address": addr, "region": "in"})
+            google_answered = True  # bias to India, but read the country it REALLY resolves to
             if data.get("status") == "OK":
                 top = data["results"][0]
                 code, name = _country_of(top)
@@ -295,9 +301,12 @@ def _geocode_uncached(addr: str):
             GEO_DIAG["last"] = f"google geocoding status {data.get('status')}: {data.get('error_message', '')[:80]}"
         except Exception as e:
             GEO_DIAG["last"] = f"google geocoding request failed: {str(e)[:80]}"  # self-heal: fall through
-    low = addr.lower()
-    for name, ll in CITY.items():  # offline fallback: our city table is all Indian
-        if name in low:
+    if google_answered:  # Google looked and could not place it: never guess from the offline table
+        return None, "unresolved"
+    low = addr.lower().strip(" .")
+    for name, ll in CITY.items():  # offline fallback (no Google): the address must BE a known Indian city, optionally with a state
+        rest = low[len(name):].strip(" ,") if low.startswith(name) else None
+        if rest is not None and (rest == "" or rest in _INDIA_WORDS):
             return ll, "offline-geocoder"
     return None, "unresolved"
 
@@ -583,16 +592,24 @@ def _remove_stock(godown, sku, qty, reason):
 @mcp.tool()
 def save_lesson(stage: str, problem: str, fix: str) -> dict:
     """Persist a lesson learned from a failure so future runs avoid it (learning loop)."""
-    ls = json.loads(LESSONS.read_text()) if LESSONS.exists() else []
-    ls.append({"stage": stage, "problem": problem, "fix": fix, "ts": time.strftime("%H:%M:%S")})
-    LESSONS.write_text(json.dumps(ls[-30:], indent=1))
+    try:
+        ls = json.loads(LESSONS.read_text()) if LESSONS.exists() else []
+    except Exception:
+        ls = []
+    ls.append({"stage": stage, "problem": _clean(problem, 300), "fix": _clean(fix, 300), "ts": time.strftime("%H:%M:%S")})
+    tmp = LESSONS.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(ls[-30:], indent=1))
+    os.replace(tmp, LESSONS)  # atomic: a concurrent reader never sees a half-written file
     return {"saved": True, "total_lessons": len(ls)}
 
 
 @mcp.tool()
 def get_lessons(stage: str = "") -> list:
     """Fetch past lessons (optionally for one stage) to apply before acting."""
-    ls = json.loads(LESSONS.read_text()) if LESSONS.exists() else []
+    try:
+        ls = json.loads(LESSONS.read_text()) if LESSONS.exists() else []
+    except Exception:
+        ls = []
     return [l for l in ls if not stage or l["stage"] == stage][-8:]
 
 
