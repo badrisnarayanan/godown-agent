@@ -474,13 +474,14 @@ def _log_carrier(name, ok):
     c.close()
 
 
-def quote_carrier(carrier: str, distance_km: float, weight_kg: float, flaky: bool = True) -> dict:
+def quote_carrier(carrier: str, distance_km: float, weight_kg: float, flaky: bool = True, boxes: int = 1) -> dict:
     """The carrier agent's decision: decline if outside its limits or full, otherwise quote with its live metrics."""
     if carrier not in CARRIERS:
         return {"error": f"unknown carrier {carrier}", "carriers": list(CARRIERS)}
     prof, state = CARRIER_PROFILE[carrier], _carrier_state(carrier)
-    if weight_kg > prof["max_kg"]:
-        return {"carrier": carrier, "declined": f"parcel {weight_kg} kg is over our {prof['max_kg']} kg limit", "metrics": state}
+    per_box = round(weight_kg / max(1, int(boxes)), 1)
+    if per_box > prof["max_kg"]:
+        return {"carrier": carrier, "declined": f"each box is {per_box} kg, over our {prof['max_kg']} kg limit", "metrics": state}
     if distance_km > prof["max_km"]:
         return {"carrier": carrier, "declined": f"{distance_km} km is outside our {prof['max_km']} km service area", "metrics": state}
     if state["load_today"] >= prof["capacity_per_day"]:
@@ -530,9 +531,9 @@ def carrier_counter(carrier: str, distance_km: float, weight_kg: float, offer: f
 
 
 @mcp.tool()
-def get_carrier_quote(carrier: str, distance_km: float, weight_kg: float) -> dict:
+def get_carrier_quote(carrier: str, distance_km: float, weight_kg: float, boxes: int = 1) -> dict:
     """Quote a carrier. Carriers: FastFreight, BlueDart-Mock, EcoMove. Each may decline (limits, capacity) or fail (outage)."""
-    return quote_carrier(carrier, distance_km, weight_kg, os.environ.get("FLAKY_CARRIER", "1") == "1")
+    return quote_carrier(carrier, distance_km, weight_kg, os.environ.get("FLAKY_CARRIER", "1") == "1", boxes)
 
 
 @mcp.tool()

@@ -373,7 +373,8 @@ class FulfilmentEngine(BaseAgent):
             async def ask(c):
                 """One A2A call to a carrier agent; falls back to the MCP tool if the A2A service is unreachable."""
                 tele[c]["attempts"] += 1
-                payload = {"distance_km": route["distance_km"], "weight_kg": box["total_weight_kg"], "flaky": flaky}
+                payload = {"distance_km": route["distance_km"], "weight_kg": box["total_weight_kg"], "flaky": flaky,
+                           "boxes": box.get("boxes", 1)}
                 try:
                     q, ms = await asyncio.to_thread(a2a_send, f"{a2a_base()}/a2a/carrier/{c}", payload)
                     tele[c]["ms"] += ms
@@ -381,7 +382,7 @@ class FulfilmentEngine(BaseAgent):
                 except Exception:
                     tele[c]["transport"] = "MCP (A2A unreachable, self-healed)"
                     return await call("get_carrier_quote", carrier=c, distance_km=route["distance_km"],
-                                      weight_kg=box["total_weight_kg"])
+                                      weight_kg=box["total_weight_kg"], boxes=box.get("boxes", 1))
 
             async def quote(c):
                 if c in hot:  # learned: this carrier flakes, so hedge with two parallel requests

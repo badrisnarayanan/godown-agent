@@ -295,7 +295,7 @@ body[data-view="eval"] #live{display:none}
     <div><b id="pf-a2a">-</b><small>A2A agent calls</small></div>
     <div><b id="pf-zero">-</b><small>steps with zero tokens</small></div>
     <div class="checks" id="pf-checks"></div>
-    <div class="cmp"><b style="display:inline;font:700 13px 'Barlow Condensed';color:#fff">Token economics:</b> only the Intake agent calls a model, once. Guardian, Fulfilment, the three carrier agents and the Judge are code, MCP tools and A2A services, so they use zero tokens and answer in milliseconds. Our first design used 5 LLM agents per order and took 31 to 140 s.</div>
+    <div class="cmp"><b style="display:inline;font:700 13px 'Barlow Condensed';color:#fff">Why so cheap and fast:</b> only 1 of our 6 agents uses AI. The Intake agent reads your message with one Gemini call. The other five (Guardian, Fulfilment, the carrier agents and the Judge) are ordinary programs, so they cost no tokens and finish in milliseconds. Our first version used AI for every step: 5 model calls and 31 to 140 s per order.</div>
   </div>
   <div class="chatbox" data-views="orders">
     <div class="chathead"><b>Order desk</b><span class="hint">Talk to Vegam like a customer would. It asks if anything is missing.</span></div>

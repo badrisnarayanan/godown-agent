@@ -49,7 +49,7 @@ def carrier_skill(name, data):
     km, kg = float(data.get("distance_km", 0)), float(data.get("weight_kg", 0))
     if data.get("action") == "counter":  # negotiation round: respond to the orchestrator's counter-offer
         return W.carrier_counter(name, km, kg, float(data.get("offer", 0)))
-    return W.quote_carrier(name, km, kg, bool(data.get("flaky", True)))
+    return W.quote_carrier(name, km, kg, bool(data.get("flaky", True)), int(data.get("boxes", 1) or 1))
 
 
 @router.get("/a2a/guardian/.well-known/agent-card.json")
