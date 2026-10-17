@@ -125,7 +125,7 @@ def state(req: Request):
     stock, ships = [], []
     if DB.exists():
         c = sqlite3.connect(DB)
-        stock = [dict(godown=g, sku=s, qty=q) for g, s, q in c.execute("SELECT godown,sku,qty FROM stock ORDER BY sku,godown")]
+        stock = [dict(godown=g, sku=s, qty=q) for g, s, q in c.execute("SELECT godown,sku,qty FROM stock WHERE sku IN (SELECT sku FROM catalog) ORDER BY sku,godown")]
         ships = [json.loads(d) for (d,) in c.execute("SELECT data FROM shipments ORDER BY created DESC LIMIT 5")]
         c.close()
     lessons = json.loads(LESSONS.read_text()) if LESSONS.exists() else []
@@ -161,22 +161,87 @@ async def staticmap(req: Request):
     if not key:
         return JSONResponse({"error": "no key"}, status_code=404)
     b = await req.json()
+
+    def ll(v):
+        x = [float(c) for c in v][:2]
+        assert -90 <= x[0] <= 90 and -180 <= x[1] <= 180
+        return x
     try:
-        f, t = [float(x) for x in b["from"]][:2], [float(x) for x in b["to"]][:2]
-        assert all(-90 <= v[0] <= 90 and -180 <= v[1] <= 180 for v in (f, t))
+        gods = [ll(g) for g in (b.get("godowns") or [])][:5]
+        f = ll(b["from"]) if b.get("from") else None
+        t = ll(b["to"]) if b.get("to") else None
+        truck = ll(b["truck"]) if b.get("truck") else None
         poly = b.get("poly") or ""
-        assert len(poly) <= 6000 and all(63 <= ord(ch) <= 126 for ch in poly)
-        b["poly"] = poly
+        assert len(poly) <= 60000 and all(63 <= ord(ch) <= 126 for ch in poly)
+        assert gods or (f and t)
     except Exception:
         return JSONResponse({"error": "invalid map request"}, status_code=400)
-    path = f"color:0x12806Fff|weight:5|enc:{b['poly']}" if b.get("poly") else f"color:0x12806Fff|weight:5|{f[0]},{f[1]}|{t[0]},{t[1]}"
-    q = [("size", "640x420"), ("scale", "2"), ("maptype", "roadmap"), ("path", path),
-         ("markers", f"color:0x13202B|label:G|{f[0]},{f[1]}"), ("markers", f"color:0xF2B01E|label:D|{t[0]},{t[1]}"), ("key", key)]
+    if len(poly) > 3000:  # keep the URL under Google's limit: thin the path to ~120 points
+        pts = decode_poly(poly)
+        step = max(1, len(pts) // 120)
+        poly = encode_poly(pts[::step] + [pts[-1]])
+    q = [("size", "640x420"), ("scale", "2"), ("maptype", "roadmap"), ("key", key)]
+    if f and t:
+        q.append(("path", f"color:0x12806Fff|weight:5|enc:{poly}" if poly else f"color:0x12806Fff|weight:5|{f[0]},{f[1]}|{t[0]},{t[1]}"))
+        q.append(("markers", f"color:0x13202B|label:G|{f[0]},{f[1]}"))
+        q.append(("markers", f"color:0xF2B01E|label:D|{t[0]},{t[1]}"))
+    else:
+        for g in gods:
+            q.append(("markers", f"color:0x13202B|size:mid|{g[0]},{g[1]}"))
+    if truck:
+        q.append(("markers", f"color:0xD6402B|label:T|{truck[0]},{truck[1]}"))
     try:
         with urllib.request.urlopen("https://maps.googleapis.com/maps/api/staticmap?" + urllib.parse.urlencode(q), timeout=6) as r:
             return Response(r.read(), media_type=r.headers.get_content_type())
-    except Exception as e:
+    except Exception:
         return JSONResponse({"error": "map unavailable"}, status_code=502)
+
+
+def decode_poly(enc):
+    """Google encoded polyline -> [(lat, lon)]."""
+    pts, i, lat, lon = [], 0, 0, 0
+    while i < len(enc):
+        for axis in (0, 1):
+            shift = result = 0
+            while True:
+                b = ord(enc[i]) - 63; i += 1
+                result |= (b & 0x1f) << shift; shift += 5
+                if b < 0x20:
+                    break
+            d = ~(result >> 1) if result & 1 else result >> 1
+            if axis == 0: lat += d
+            else: lon += d
+        pts.append((lat / 1e5, lon / 1e5))
+    return pts
+
+
+def encode_poly(pts):
+    out, plat, plon = [], 0, 0
+    for la, lo in pts:
+        for v, prev in ((round(la * 1e5), plat), (round(lo * 1e5), plon)):
+            d = v - prev
+            d = ~(d << 1) if d < 0 else d << 1
+            while d >= 0x20:
+                out.append(chr((0x20 | (d & 0x1f)) + 63)); d >>= 5
+            out.append(chr(d + 63))
+        plat, plon = round(la * 1e5), round(lo * 1e5)
+    return "".join(out)
+
+
+def point_along(pts, frac):
+    """Position `frac` (0..1) of the way along the polyline, by distance."""
+    import math
+    seg = [math.dist(pts[i], pts[i + 1]) for i in range(len(pts) - 1)]
+    want, acc = sum(seg) * max(0.0, min(1.0, frac)), 0.0
+    for i, d in enumerate(seg):
+        if acc + d >= want and d > 0:
+            t = (want - acc) / d
+            return [pts[i][0] + (pts[i + 1][0] - pts[i][0]) * t, pts[i][1] + (pts[i + 1][1] - pts[i][1]) * t]
+        acc += d
+    return list(pts[-1])
+
+
+_ROUTE_CACHE = {}  # (godown, destination) -> encoded road polyline
 
 
 DEMO_SECONDS_PER_HOUR = 5  # demo clock: 1 hour of ETA plays out in 5 seconds
@@ -197,12 +262,18 @@ def track(tid: str):
     gname, glat, glon = W.GODOWNS[d["godown"]]
     dest = W._geocode(d["destination"])[0] or (glat, glon)
     move = max(0.0, min(1.0, (frac - 0.2) / 0.7))
+    key = (d["godown"], d["destination"])
+    if key not in _ROUTE_CACHE:
+        rt = W._routes_api((glat, glon), dest)
+        _ROUTE_CACHE[key] = rt["polyline"] if rt else ""
+    poly = _ROUTE_CACHE[key]
+    on_road = point_along(decode_poly(poly), move) if poly else None
     steps = [("Order received", 0), (f"Packed at {gname}", 0.08), ("Picked up by " + d["carrier"], 0.2),
              ("In transit", 0.35), ("Out for delivery", 0.9), ("Delivered", 1.0)]
     idx = json.loads(INDEX.read_text()) if INDEX.exists() else {}
     return {"source": idx.get(d["tracking_id"]), "shipment": d, "progress": round(frac, 3), "remaining_hours": round(d["eta_hours"] * (1 - frac), 1),
             "delivered": frac >= 1, "from": [glat, glon], "to": list(dest),
-            "position": [glat + (dest[0] - glat) * move, glon + (dest[1] - glon) * move],
+            "position": on_road or [glat + (dest[0] - glat) * move, glon + (dest[1] - glon) * move], "poly": poly,
             "steps": [{"label": l, "done": frac >= t} for l, t in steps]}
 
 

@@ -117,7 +117,7 @@ textarea{width:100%;min-height:72px;resize:vertical;border:2px solid var(--ink);
 .tabs{position:absolute;right:12px;top:8px;display:flex;gap:0;z-index:2}
 .tabs button{border:2px solid var(--ink);background:#fff;padding:2px 10px;font:700 13px "Barlow Condensed";letter-spacing:.04em}
 .tabs button.on{background:var(--ink);color:#fff}
-#gmap{display:block;width:100%;max-height:54vh;object-fit:cover}
+#gmap{display:block;width:100%;max-height:60vh;object-fit:contain;background:var(--map)}
 .qrow{display:grid;grid-template-columns:96px 1fr 44px;gap:8px;align-items:center;font-size:12.5px;margin:4px 0}
 .qbar{height:12px;background:var(--concrete)}.qbar i{display:block;height:100%;background:var(--mute)}.qrow.win .qbar i{background:var(--teal)}.qrow.win b{color:var(--teal)}
 .badge{display:inline-block;font:700 11px "Barlow Condensed";letter-spacing:.05em;padding:1px 6px;border:1.5px solid var(--ink);margin-left:6px;background:#fff}
@@ -193,7 +193,7 @@ body:not([data-view="inv"]) #v-inv,body:not([data-view="biz"]) #v-biz{display:no
 .chatbox{border:2px solid var(--ink);background:var(--paper)}
 .chathead{display:flex;gap:12px;align-items:baseline;padding:8px 12px;background:var(--ink);color:#fff}
 .chathead b{font:700 18px "Barlow Condensed";letter-spacing:.05em;color:var(--yellow)}.chathead .hint{color:#aebbc7}
-.thread{max-height:290px;min-height:90px;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:12px;background:#fff}
+.thread{max-height:230px;min-height:70px;overflow:auto;display:flex;flex-direction:column;gap:8px;padding:12px;background:#fff}
 .composer{border-top:2px solid var(--ink);padding:8px 10px;background:var(--paper)}
 .composer textarea{min-height:46px}
 .bub .chips{margin-top:8px;display:flex;flex-wrap:wrap;gap:6px}
@@ -259,7 +259,7 @@ body:not([data-view="inv"]) #v-inv,body:not([data-view="biz"]) #v-biz{display:no
       <div class="row"><button class="btn primary" id="go">Send</button><button class="btn" id="mic">Speak</button><button class="btn" id="attach">Attach photo</button><span id="fname" class="hint"></span></div>
     </div>
   </div>
-  <div class="banner" id="banner" data-views="orders">
+  <div class="banner" id="banner" data-views="orders" hidden>
     <div class="b-top"><span class="b-step" id="b-step">Ready</span><span class="b-time" id="b-time"></span></div>
     <div class="b-title" id="b-title">Place an order to begin</div>
     <div class="b-sub" id="b-sub">Choose a quick order, type one, attach a photo, or speak. Progress shows here, one step at a time.</div>
@@ -383,7 +383,14 @@ function drawMap(){
     h+=`<g class="gd ${cls}"><rect x="${x-8}" y="${y-8}" width="16" height="16"/>${oos[id]?`<circle class="pulse" cx="${x}" cy="${y}" r="6"/>`:''}<text x="${x-8}" y="${y+24}">${g.n.toUpperCase()}${oos[id]?' (EMPTY)':''}</text></g>`}
   $('map').innerHTML=h}
 drawMap();
-fetch('/api/config').then(r=>r.json()).then(c=>{mapsOn=c.maps;$('tabs').hidden=!c.maps});
+let overviewUrl=null,prevBlob=null,lastTrackMap=0;
+fetch('/api/config').then(r=>r.json()).then(c=>{mapsOn=c.maps;$('tabs').hidden=!c.maps;defaultMap()});
+async function defaultMap(){if(!mapsOn){showTab(false);return}
+  if(!overviewUrl){try{const r=await fetch('/api/staticmap',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({godowns:Object.values(GD).map(g=>g.ll)})});if(r.ok)overviewUrl=URL.createObjectURL(await r.blob())}catch(_){}}
+  if(overviewUrl){$('gmap').src=overviewUrl;showTab(true)}else showTab(false)}
+async function trackMap(t){const now=Date.now();if(!mapsOn||(now-lastTrackMap<4000&&!t.delivered))return;lastTrackMap=now;
+  try{const r=await fetch('/api/staticmap',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({from:t.from,to:t.to,poly:t.poly,truck:t.position})});
+    if(r.ok){const u=URL.createObjectURL(await r.blob());$('gmap').src=u;showTab(true);if(prevBlob)URL.revokeObjectURL(prevBlob);prevBlob=u}}catch(_){}}
 document.getElementById('gmap').onerror=()=>showTab(false);
 function showTab(g){$('gmap').hidden=!g;$('map').style.display=g?'none':'block';$('tab-g').classList.toggle('on',g);$('tab-s').classList.toggle('on',!g)}
 $('tab-s').onclick=()=>showTab(false);$('tab-g').onclick=()=>showTab(true);
@@ -422,7 +429,7 @@ $('go').onclick=run;
 $('txt').onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();run()}};
 $('reset').onclick=async()=>{await af('/api/reset',{method:'POST'});resetUI(true);refresh()};
 
-function resetUI(full){stopTrack();$('track-empty').hidden=false;oos={};src=null;route=null;D={};$('details').className='empty';$('details').textContent='Appears once an order is read.';showTab(false);drawMap();
+function resetUI(full){stopTrack();$('track-empty').hidden=false;oos={};src=null;route=null;D={};$('details').className='empty';$('details').textContent='Appears once an order is read.';defaultMap();drawMap();
   ['intake','godown','packroute','carrier','result'].forEach(s=>{$('s-'+s).classList.remove('on','cur');$('t-'+s).textContent=''});
   $('log').innerHTML='<div class="empty">'+(full?'Memory and stock reset.':'Running...')+'</div>';$('res').className='empty';$('res').textContent=full?'No order yet.':'Dispatching...';$('meter').innerHTML=''}
 
@@ -441,12 +448,11 @@ async function af(url,opts={},retry=true){const h={...(opts.headers||{}),'x-admi
 /* ---- views ---- */
 function setView(v){document.body.dataset.view=v;document.querySelectorAll('[data-go]').forEach(b=>b.classList.toggle('on',b.dataset.go===v));
   if(v!=='track')stopTrack();else if(!trkTimer){$('track-empty').hidden=false}
-  showTab(false);
-  if(v==='orders'||v==='track')drawMap();if(v==='inv'||v==='biz')refresh();if(v==='inv')loadPending();history.replaceState(null,'','#'+v);window.scrollTo(0,0)}
+  if(v==='orders'||v==='track')drawMap();if(v==='orders'||v==='track')defaultMap();if(v==='inv'||v==='biz')refresh();if(v==='inv')loadPending();history.replaceState(null,'','#'+v);window.scrollTo(0,0)}
 document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>setView(b.dataset.go));
 /* ---- banner: one place that always says where the order is ---- */
 const STEPS={intake:[1,'Reading your order'],godown:[2,'Finding stock'],packroute:[3,'Packing and routing'],carrier:[4,'Choosing the fastest carrier'],result:[5,'Dispatching']};
-function banner(stage,detail){const x=STEPS[stage];if(!x)return;if(thinkB)thinkB.textContent=`Step ${x[0]} of 5: ${x[1]}...`;const b=$('banner');b.className='banner working';$('b-step').textContent='Step '+x[0]+' of 5';$('b-title').textContent=x[1];$('b-sub').textContent=detail||'';$('b-bar').style.width=(x[0]/5*100)+'%';$('b-act').innerHTML=''}
+function banner(stage,detail){const x=STEPS[stage];if(!x)return;$('banner').hidden=false;if(thinkB)thinkB.textContent=`Step ${x[0]} of 5: ${x[1]}...`;const b=$('banner');b.className='banner working';$('b-step').textContent='Step '+x[0]+' of 5';$('b-title').textContent=x[1];$('b-sub').textContent=detail||'';$('b-bar').style.width=(x[0]/5*100)+'%';$('b-act').innerHTML=''}
 function showSrc(f,savedUrl){const el=$('srcprev');if(!f){el.hidden=true;return}const u=`data:${f.mime};base64,${f.b64}`;
   el.hidden=false;el.innerHTML=(f.mime.startsWith('image')?`<img src="${u}" alt="Uploaded order">`:`<audio controls src="${u}"></audio>`)+`<div><b>Your order, as received</b><small id="saved-note">${savedUrl?'Saved: '+esc(savedUrl):'Saving a copy...'}</small></div>`}
 
@@ -476,14 +482,14 @@ function handle(e){
   else if(e.kind==='result')showResult(e);
   else if(e.kind==='end'){lastTotal=e.t;$('st-time').textContent=e.t.toFixed(1)}}
 function smsText(t){const m=(t||'').split(' | ').pop();return m&&m.startsWith('Hi ')?`<div class="sms"><small>Text sent to customer</small>${esc(m)}</div>`:''}
-function finishBanner(r,e){const b=$('banner');const ok=r.status==='OK';b.className='banner '+(ok?'done':r.status==='PARTIAL'?'':'fail');
+function finishBanner(r,e){const b=$('banner');b.hidden=false;const ok=r.status==='OK';b.className='banner '+(ok?'done':r.status==='PARTIAL'?'':'fail');
   $('b-bar').style.width='100%';$('b-time').textContent='finished in '+e.t+'s';
   if(r.status==='NO_ORDER'){$('b-title').textContent='That was not an order';$('b-sub').textContent='Try: "3 laptops to Chennai for Ravi"';return}
   $('b-title').textContent=ok?'Dispatched':r.status==='PARTIAL'?'Partly shipped':'Could not ship';
   $('b-sub').textContent=r.tracking_id?`${r.shipped} x ${r.sku} from ${(GD[r.godown]||{}).n||r.godown} to ${r.destination} via ${r.carrier}. Tracking ${r.tracking_id}.`:(r.reason||'');
   $('b-act').innerHTML=r.tracking_id?`<button class="btn" id="b-track">Track this shipment</button><button class="btn ghost" id="b-again">Place another</button>`:'';
   if(r.tracking_id){$('b-track').onclick=()=>{setView('track');startTrack(r.tracking_id)};$('b-again').onclick=()=>{$('txt').value='';$('txt').focus();window.scrollTo(0,0)}}}
-function askBanner(r){const b=$('banner');b.className='banner ask';$('b-step').textContent='Waiting for your reply';$('b-title').textContent='Vegam asked you a question';$('b-sub').textContent='Answer in the chat above.';$('b-bar').style.width='100%';$('b-time').textContent='';$('b-act').innerHTML='';
+function askBanner(r){const b=$('banner');b.hidden=false;b.className='banner ask';$('b-step').textContent='Waiting for your reply';$('b-title').textContent='Vegam asked you a question';$('b-sub').textContent='Answer in the chat above.';$('b-bar').style.width='100%';$('b-time').textContent='';$('b-act').innerHTML='';
   const chips=(r.options||[]).map(o=>`<button class="chip" data-opt="${esc(o.split(' (').pop().replace(')',''))}">${esc(o.split(' (')[0])}</button>`).join('');
   (thinkB||tbub('bot','')).innerHTML=esc(r.question)+(chips?`<div class="chips">${chips}</div>`:'');thinkB=null;
   thread.querySelectorAll('[data-opt]').forEach(x=>x.onclick=()=>{$('txt').value=x.dataset.opt;run()});
@@ -508,13 +514,13 @@ async function refresh(){const s=await (await fetch('/api/state',{headers:{'x-ad
     return `<div class="bar ${q===0?'z':''}"><i style="width:${Math.min(100,q/3)}%"></i><span>${q}</span></div>`}).join('')+`</div></div>`).join(''):'<div class="empty">Stock appears after the first order.</div>';
   $('stock2').innerHTML=$('stock').innerHTML;$('lessons').innerHTML=s.lessons.length?s.lessons.slice().reverse().map(l=>`<div class="lesson"><b>${l.stage}</b>${esc(l.problem)}<br><em>${esc(l.fix)}</em></div>`).join(''):'<div class="empty">Nothing learned yet. Fixes appear here and get reused.</div>'}
 function stopTrack(){clearInterval(trkTimer);trkTimer=null;truck=null;$('trackbox').hidden=true}
-async function startTrack(id){id=(id||'').trim().toUpperCase();if(!id)return;clearInterval(trkTimer);
+async function startTrack(id){id=(id||'').trim().toUpperCase();if(!id)return;clearInterval(trkTimer);lastTrackMap=0;
   const tick=async()=>{const r=await fetch('/api/track/'+encodeURIComponent(id));
     if(!r.ok){$('track-empty').hidden=true;$('trackbox').hidden=false;$('trk-id').textContent=id;$('trk-eta').textContent='No shipment with that tracking ID.';$('trk-tl').innerHTML='';clearInterval(trkTimer);return}
     const t=await r.json(),s=t.shipment;$('trackbox').hidden=false;$('track-empty').hidden=true;$('trk-src').innerHTML=t.source?(t.source.mime.startsWith('image')?`<img src="${t.source.url}" alt="Original order" style="max-width:100%;max-height:120px;border:1px solid var(--line)">`:`<audio controls src="${t.source.url}" style="width:100%"></audio>`)+'<div class="hint">Original order, saved</div>':'';$('trk-id').textContent=s.tracking_id;
     $('trk-eta').textContent=t.delivered?'Delivered to '+s.destination:`${t.remaining_hours} h to ${s.destination} (${s.carrier})`;
     $('trk-tl').innerHTML=t.steps.map(x=>`<li class="${x.done?'d':''}"><i></i><span>${esc(x.label)}</span></li>`).join('');
-    route={from:t.from,to:t.to};truck=t.position;src=s.godown;drawMap();if(t.delivered)clearInterval(trkTimer)};
+    route={from:t.from,to:t.to};truck=t.position;src=s.godown;drawMap();trackMap(t);if(t.delivered)clearInterval(trkTimer)};
   await tick();trkTimer=setInterval(tick,1500)}
 $('trackgo').onclick=()=>startTrack($('tid').value);
 $('tid').onkeydown=e=>{if(e.key==='Enter')startTrack($('tid').value)};

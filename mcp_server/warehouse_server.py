@@ -223,28 +223,94 @@ def _geocode(addr: str):
     return out
 
 
+INDIA_POLY = [(74.5, 36.8), (77.5, 35.6), (79, 34.2), (78.8, 32.5), (80.5, 30.5), (81, 30.2), (84, 28.6), (88, 27.9), (88.9, 27.1),
+              (89.8, 26.8), (92, 26.8), (92, 28), (95, 29.2), (97.3, 28.2), (96, 27), (95, 26), (94.5, 24.5), (93.3, 23), (92.3, 21.8),
+              (92.2, 23.5), (91.5, 24.2), (90, 25.2), (89, 26.2), (88.4, 25.5), (88.1, 24.3), (88.8, 22), (87, 21.5), (86.5, 20.2),
+              (84.8, 19), (82.3, 16.8), (80.2, 15.5), (80.3, 13.5), (79.8, 11.5), (79.3, 10.3), (78, 8.8), (77.5, 8), (76.5, 9.2),
+              (75.5, 12), (74.7, 14.5), (73.5, 16.5), (72.8, 19.2), (72.8, 21), (70.5, 20.8), (69, 22.3), (70.5, 23.3), (68.3, 23.6),
+              (68.8, 24.5), (70.3, 25), (70, 27), (72, 28.6), (73.5, 30.5), (74.5, 32), (74, 34)]  # coarse outline, offline fallback only
+_OUTSIDE = {}  # address -> where it really is, for addresses found outside India
+
+
+def _in_india_polygon(lat, lon):
+    inside, n = False, len(INDIA_POLY)
+    for i in range(n):
+        x1, y1 = INDIA_POLY[i]; x2, y2 = INDIA_POLY[(i + 1) % n]
+        if (y1 > lat) != (y2 > lat) and lon < (x2 - x1) * (lat - y1) / (y2 - y1) + x1:
+            inside = not inside
+    return inside
+
+
+def _gget(params):
+    key = os.environ.get("GOOGLE_MAPS_API_KEY")
+    url = "https://maps.googleapis.com/maps/api/geocode/json?" + urllib.parse.urlencode({**params, "key": key})
+    with urllib.request.urlopen(url, timeout=5) as r:
+        return json.load(r)
+
+
+def _country_of(result):
+    for c in result.get("address_components", []):
+        if "country" in c.get("types", []):
+            return c.get("short_name"), c.get("long_name")
+    return None, None
+
+
+def _coords_country_ok(lat, lon):
+    """True if the point is in India. Reverse-geocodes with Google when available, else a coarse polygon."""
+    if os.environ.get("USE_REAL_MAPS") == "1" and os.environ.get("GOOGLE_MAPS_API_KEY"):
+        try:
+            data = _gget({"latlng": f"{lat},{lon}"})
+            for res in data.get("results", []):
+                code, name = _country_of(res)
+                if code:
+                    return code == "IN", name
+            return False, "no country (open sea or unmapped)"
+        except Exception:
+            pass
+    return _in_india_polygon(lat, lon), "outside the India outline"
+
+
 def _geocode_uncached(addr: str):
     ll = _parse_coords(addr)
     if ll:
+        ok, where = _coords_country_ok(*ll)
+        if not ok:
+            _OUTSIDE[addr] = where
+            return None, "outside-india"
         return ll, "coordinates"
-    key = os.environ.get("GOOGLE_MAPS_API_KEY")
-    if os.environ.get("USE_REAL_MAPS") == "1" and key:
+    if os.environ.get("USE_REAL_MAPS") == "1" and os.environ.get("GOOGLE_MAPS_API_KEY"):
         try:
-            url = "https://maps.googleapis.com/maps/api/geocode/json?" + urllib.parse.urlencode(
-                {"address": addr, "key": key, "region": "in"})
-            with urllib.request.urlopen(url, timeout=5) as r:
-                data = json.load(r)
+            data = _gget({"address": addr, "region": "in"})  # bias to India, but read the country it REALLY resolves to
             if data.get("status") == "OK":
-                loc = data["results"][0]["geometry"]["location"]
+                top = data["results"][0]
+                code, name = _country_of(top)
+                if code and code != "IN":
+                    _OUTSIDE[addr] = name or "another country"
+                    return None, "outside-india"
+                if "country" in top.get("types", []):  # just "India": too vague to deliver to
+                    GEO_DIAG["last"] = "that address is only a whole country; please give a city or pincode"
+                    return None, "unresolved"
+                loc = top["geometry"]["location"]
                 return (loc["lat"], loc["lng"]), "google-maps"
             GEO_DIAG["last"] = f"google geocoding status {data.get('status')}: {data.get('error_message', '')[:80]}"
         except Exception as e:
             GEO_DIAG["last"] = f"google geocoding request failed: {str(e)[:80]}"  # self-heal: fall through
     low = addr.lower()
-    for name, ll in CITY.items():
+    for name, ll in CITY.items():  # offline fallback: our city table is all Indian
         if name in low:
             return ll, "offline-geocoder"
     return None, "unresolved"
+
+
+def india_only_error(destination):
+    """Hard business rule: we ship only within India. Returns an error dict when the destination is abroad, else None."""
+    destination = _clean(destination, 200)
+    ll, src = _geocode(destination)
+    if destination in _OUTSIDE or src == "outside-india":
+        where = _OUTSIDE.get(destination, "outside India")
+        return {"error": f"Vegam only delivers within India. '{destination}' is in {where}, so I can't ship there.",
+                "policy": "india_only"}
+    return None
 
 
 @mcp.tool()
@@ -253,6 +319,9 @@ def check_stock(sku: str, qty: int, destination: str) -> dict:
     if _bad_qty(qty):
         return {"error": f"qty must be a whole number between 1 and {MAX_QTY}"}
     destination = _clean(destination, 200)
+    abroad = india_only_error(destination)
+    if abroad:
+        return abroad
     dest, src = _geocode(destination)
     if dest is None:
         return {"error": f"could not geocode '{destination}'",
@@ -371,6 +440,9 @@ def create_shipment(order_id: str, customer: str, destination: str, godown: str,
                     box: str, carrier: str, price: float, eta_hours: float, box_cost: float = 0.0) -> dict:
     """Create the shipment record, generate tracking ID and customer notification text."""
     order_id, customer, destination = _clean(order_id, 24), _clean(customer, 60), _clean(destination, 200)
+    abroad = india_only_error(destination)
+    if abroad:
+        return abroad
     tid = "TRK" + uuid.uuid4().hex[:8].upper()
     data = dict(tracking_id=tid, order_id=order_id, customer=customer, destination=destination, godown=godown,
                 sku=sku, qty=qty, box=box, carrier=carrier, price=price, eta_hours=eta_hours, status="DISPATCHED")
